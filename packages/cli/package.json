@@ -1,0 +1,61 @@
+{
+  "name": "webcrawl",
+  "version": "1.2.4",
+  "description": "Webcrawl Anything CLI — crawl, search, and extract structured evidence from any website, SPA, PDF, Office file, YouTube video, GitHub repo, ArXiv paper, or CVE",
+  "type": "module",
+  "license": "MIT",
+  "author": "Brainfish AI <support@webcrawl.app> (https://webcrawl.app)",
+  "homepage": "https://webcrawl.app",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/brainfish-ai/webcrawl-anything.git",
+    "directory": "packages/cli"
+  },
+  "bugs": {
+    "url": "https://github.com/brainfish-ai/webcrawl-anything/issues"
+  },
+  "keywords": [
+    "webcrawl",
+    "web-crawler",
+    "web-scraper",
+    "search-engine",
+    "mcp",
+    "claude-code",
+    "cursor",
+    "codex",
+    "pdf-parser",
+    "youtube-transcript",
+    "cve",
+    "ai-agents"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "bin": {
+    "webcrawl": "./dist/bin.js"
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "development": "./src/index.ts",
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "prepack": "npm run build",
+    "test": "node --conditions=development --import tsx --test test/*.test.ts"
+  },
+  "dependencies": {
+    "@webcrawl/client": "^1.2.4"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

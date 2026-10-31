@@ -1,0 +1,61 @@
+{
+  "name": "@webcrawl/mcp",
+  "version": "1.2.4",
+  "description": "MCP server for Webcrawl Anything — zero-key local engine or webcrawl.app cloud (search, scrape, parse PDF/Office/YouTube, map, crawl, extract, rerank)",
+  "type": "module",
+  "license": "MIT",
+  "author": "Brainfish AI <support@webcrawl.app> (https://webcrawl.app)",
+  "homepage": "https://webcrawl.app",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/brainfish-ai/webcrawl-anything.git",
+    "directory": "packages/mcp"
+  },
+  "bugs": {
+    "url": "https://github.com/brainfish-ai/webcrawl-anything/issues"
+  },
+  "keywords": [
+    "mcp",
+    "model-context-protocol",
+    "webcrawl",
+    "web-search",
+    "web-scraper",
+    "pdf-parser",
+    "claude-code",
+    "cursor",
+    "codex",
+    "ai-agents"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "bin": {
+    "webcrawl-mcp": "./dist/bin.js"
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "development": "./src/index.ts",
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "prepack": "npm run build",
+    "test": "node --conditions=development --import tsx --test test/*.test.ts"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.32.2",
+    "@webcrawl/client": "^1.2.4",
+    "zod": "^4.0.0"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
