@@ -1,0 +1,122 @@
+name: Release Packages to npm
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+  workflow_dispatch:
+    inputs:
+      bump:
+        description: "Version bump (none publishes current version in package.json)"
+        required: false
+        default: "none"
+        type: choice
+        options:
+          - none
+          - patch
+          - minor
+          - major
+
+permissions:
+  contents: write
+  id-token: write
+
+jobs:
+  release:
+    name: Build, Test & Publish to npm
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          registry-url: "https://registry.npmjs.org"
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Optional version bump (workflow_dispatch)
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.bump != 'none' }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          bash scripts/release.sh "${{ inputs.bump }}" --no-publish --no-push
+          git push origin HEAD:main --follow-tags
+
+      - name: Build workspace packages
+        run: npm run build:packages
+
+      - name: Run workspace tests
+        run: npm run test:packages
+
+      - name: Publish @webcrawl/client, @webcrawl/mcp, and webcrawl to npm
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          VERSION=$(node -p "require('./packages/cli/package.json').version")
+          echo "Publishing version ${VERSION} to npm..."
+
+          is_on_registry() {
+            local pkg_name="$1"
+            local encoded="${pkg_name/\//%2f}"
+            local has_ver
+            has_ver=$(curl -fsSL -H 'Cache-Control: no-cache' "https://registry.npmjs.org/${encoded}?t=$(date +%s)$RANDOM" 2>/dev/null | node -e '
+              try {
+                const d = JSON.parse(require("fs").readFileSync(0, "utf8"));
+                const v = process.argv[1];
+                if (d.versions && d.versions[v]) process.stdout.write("yes");
+              } catch {}
+            ' "$VERSION")
+            [ "$has_ver" = "yes" ]
+          }
+
+          publish_if_needed() {
+            local pkg_name="$1"
+            local workspace_path="$2"
+            if is_on_registry "$pkg_name"; then
+              echo "✓ ${pkg_name}@${VERSION} is already published on npm, skipping."
+            else
+              echo "→ Publishing ${pkg_name}@${VERSION} (${workspace_path})..."
+              npm publish --workspace="${workspace_path}" --access public
+            fi
+          }
+
+          wait_for_registry() {
+            local pkg_name="$1"
+            echo "⏳ Waiting for ${pkg_name}@${VERSION} to become visible on npm registry..."
+            for i in $(seq 1 40); do
+              if is_on_registry "$pkg_name"; then
+                echo "✓ ${pkg_name}@${VERSION} is live on npm!"
+                return 0
+              fi
+              sleep 3
+            done
+            echo "⚠️ Timed out waiting for ${pkg_name}@${VERSION} to index on npm."
+            return 1
+          }
+
+          publish_if_needed "@webcrawl/client" "packages/client"
+          wait_for_registry "@webcrawl/client"
+
+          publish_if_needed "@webcrawl/mcp" "packages/mcp"
+          wait_for_registry "@webcrawl/mcp"
+
+          publish_if_needed "webcrawl" "packages/cli"
+          wait_for_registry "webcrawl"
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          VERSION=$(node -p "require('./packages/cli/package.json').version")
+          TAG="v${VERSION}"
+          if ! gh release view "$TAG" >/dev/null 2>&1; then
+            gh release create "$TAG" --generate-notes --title "$TAG"
+          fi
