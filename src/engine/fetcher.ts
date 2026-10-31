@@ -86,12 +86,44 @@ function hashCode(str: string): number {
   return hash;
 }
 
+/** Markers that only appear on an AWS WAF challenge interstitial. */
+const AWS_WAF_CHALLENGE_MARKERS = [
+  "awswafcookiedomainlist",
+  "awswafintegration",
+  "aws-waf-token",
+  'id="challenge-container"',
+  "/__challenge_",
+];
+
+/**
+ * True when an HTML response (with optional status) is an AWS WAF challenge
+ * interstitial: a marker match proves it regardless of status; otherwise a
+ * documented HTTP 202 whose payload is a `<script>`-only HTML shell with zero
+ * visible text (APIs legitimately return 202 too, so status alone is not proof).
+ */
+export function isAwsWafChallenge(html: string, status?: number): boolean {
+  const lower = String(html ?? "").slice(0, 8000).toLowerCase();
+  if (AWS_WAF_CHALLENGE_MARKERS.some((m) => lower.includes(m))) return true;
+  if (status === 202) {
+    if (!lower.includes("<html")) return false;
+    const visibleText = lower
+      .slice(0, 8000)
+      .replace(/<script[\s\S]*?<\/script>/g, "")
+      .replace(/<noscript[\s\S]*?<\/noscript>/g, "")
+      .replace(/<style[\s\S]*?<\/style>/g, "")
+      .replace(/<[^>]+>/g, " ")
+      .trim();
+    return visibleText.length === 0;
+  }
+  return false;
+}
+
 export function isAntiBotChallenge(html: string, status: number): boolean {
   if (status === 403 || status === 429 || status === 503) {
     return true;
   }
   const lower = html.slice(0, 6000).toLowerCase();
-  return (
+  if (
     lower.includes("cf-browser-verification") ||
     lower.includes("challenge-platform") ||
     lower.includes("just a moment...") ||
@@ -99,7 +131,12 @@ export function isAntiBotChallenge(html: string, status: number): boolean {
     lower.includes("_vercel/security") ||
     lower.includes("enable javascript and cookies to continue") ||
     lower.includes("_cf_chl_opt")
-  );
+  ) {
+    return true;
+  }
+  // AWS WAF serves its invisible JS challenge as HTTP 202 with none of the
+  // Cloudflare/Vercel markers, so those pages used to pass as real content.
+  return isAwsWafChallenge(html, status);
 }
 
 let sharedImpit: any = null;

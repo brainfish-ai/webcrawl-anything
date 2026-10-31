@@ -158,18 +158,22 @@ export async function escalateToSandboxOrBrowser(
         }
 
         // A challenge page is not content: never return it as a successful escalation.
+        // An empty shell (e.g. an AWS WAF 202 interstitial) is not content either:
+        // parse first and fall through to the browser tier instead.
         if (html && html.length > 100 && !isAntiBotChallenge(html, 200)) {
           const parsed = fastHtmlToMarkdown(html, url, {
             retainImages: options.retainImages,
           });
-          return {
-            html,
-            markdown: parsed.markdown,
-            title: parsed.title,
-            links: parsed.links,
-            statusCode: 200,
-            tier: "sandbox",
-          };
+          if (parsed.markdown.trim().length > 0) {
+            return {
+              html,
+              markdown: parsed.markdown,
+              title: parsed.title,
+              links: parsed.links,
+              statusCode: 200,
+              tier: "sandbox",
+            };
+          }
         }
       } finally {
         await sandbox.stop().catch(() => {});

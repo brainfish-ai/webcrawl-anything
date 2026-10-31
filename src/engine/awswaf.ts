@@ -14,40 +14,16 @@
  *   - `awsWafCookieDomainList` / `AwsWafIntegration` (documented JS API)
  *   - `aws-waf-token` cookie reference
  *   - `<div id="challenge-container">` + `/__challenge_<id>/.../challenge.js`
+ *
+ * The detection itself now lives in the shared detector
+ * (`isAwsWafChallenge` in `./fetcher.js`, also folded into
+ * `isAntiBotChallenge`); this module re-exports it and adds the local
+ * stealth-routing path so challenge pages can be solved and read anyway.
  */
-import { fetchWithTlsImpersonation, fastHtmlToMarkdown, isAntiBotChallenge } from "../engine.js";
+import { fetchWithTlsImpersonation, isAntiBotChallenge, isAwsWafChallenge } from "./fetcher.js";
+import { fastHtmlToMarkdown } from "./markdown.js";
 
-/** Markers that only appear on an AWS WAF challenge interstitial. */
-const AWS_WAF_MARKERS = [
-  "awswafcookiedomainlist",
-  "awswafintegration",
-  "aws-waf-token",
-  "id=\"challenge-container\"",
-  "/__challenge_",
-];
-
-/** True when an HTML response (with optional status) is an AWS WAF challenge interstitial. */
-export function isAwsWafChallenge(html: string, status?: number): boolean {
-  const lower = String(html ?? "").slice(0, 8000).toLowerCase();
-  const hasMarker = AWS_WAF_MARKERS.some((m) => lower.includes(m));
-  if (hasMarker) return true;
-  // 202 alone is the documented Challenge status, but APIs can legitimately
-  // return 202 - only treat it as a challenge when the body is empty/challenge-ish.
-  if (status === 202) {
-    // 202 is the documented Challenge interstitial status. The interstitial's
-    // entire payload is <script>/<noscript>, so visible text is empty.
-    if (!lower.includes("<html")) return false;
-    const visibleText = lower
-      .slice(0, 8000)
-      .replace(/<script[\s\S]*?<\/script>/g, "")
-      .replace(/<noscript[\s\S]*?<\/noscript>/g, "")
-      .replace(/<style[\s\S]*?<\/style>/g, "")
-      .replace(/<[^>]+>/g, " ")
-      .trim();
-    return visibleText.length === 0;
-  }
-  return false;
-}
+export { isAwsWafChallenge };
 
 /** True when a fetch response is any known bot check (upstream detector + AWS WAF). */
 export function isBlockedLike(html: string, status?: number): boolean {

@@ -160,7 +160,7 @@ try {
       const PER_DOC = 1500000;
       const TOTAL = 10000000;
       const started = Date.now();
-      const markers = ["vercel security checkpoint", "just a moment...", "cf-browser-verification", "challenge-platform", "_cf_chl_opt", "enable javascript and cookies to continue", "_vercel/security", "attention required! | cloudflare"];
+      const markers = ["vercel security checkpoint", "just a moment...", "cf-browser-verification", "challenge-platform", "_cf_chl_opt", "enable javascript and cookies to continue", "_vercel/security", "attention required! | cloudflare", "awswafcookiedomainlist", "awswafintegration", "aws-waf-token", 'id="challenge-container"', "/__challenge_"];
       const looksBlocked = (s) => { const l = String(s || "").slice(0, 8000).toLowerCase(); return markers.some((m) => l.includes(m)); };
       let ua = "";
       try {

@@ -71,3 +71,30 @@ test("isBlockedLike covers upstream Cloudflare/Vercel checks plus AWS WAF", () =
   assert.equal(isBlockedLike("<html><title>Just a moment...</title></html>", 403), true);
   assert.equal(isBlockedLike(REAL_BOOKING_PAGE, 200), false);
 });
+
+test("isAntiBotChallenge (shared detector) folds in AWS WAF detection", async () => {
+  const { isAntiBotChallenge } = await import("../engine/fetcher.js");
+  // The captured AWS WAF interstitial used to pass as real content.
+  assert.equal(isAntiBotChallenge(BOOKING_AWS_WAF_CHALLENGE, 202), true);
+  assert.equal(isAntiBotChallenge(BOOKING_AWS_WAF_CHALLENGE, 200), true);
+  // Status-only empty shell.
+  assert.equal(isAntiBotChallenge("<html><body></body></html>", 202), true);
+  // False-positive guards: real 202 with content, real page, other bot checks.
+  assert.equal(isAntiBotChallenge("<html><body><p>ok</p></body></html>", 202), false);
+  assert.equal(isAntiBotChallenge(REAL_BOOKING_PAGE, 200), false);
+  assert.equal(isAntiBotChallenge("<html><title>Just a step</title></html>", 200), false);
+  assert.equal(isAntiBotChallenge("<html><title>Just a moment...</title></html>", 200), true);
+  assert.equal(isAntiBotChallenge(VERCEL_CHECKPOINT, 200), true);
+  // A 202 JSON API body is not an HTML challenge shell.
+  assert.equal(isAntiBotChallenge('{"accepted": true}', 202), false);
+});
+
+test("sandbox challenge guard treats an AWS WAF interstitial as non-content", async () => {
+  const { isChallengeResult } = await import("../sandbox.js");
+  // The curl tier's guard mirrors isAntiBotChallenge, so the AWS WAF
+  // interstitial must be flagged and force a fall-through to the browser tier.
+  assert.equal(isChallengeResult(BOOKING_AWS_WAF_CHALLENGE, "", 200), true);
+  assert.equal(isChallengeResult(BOOKING_AWS_WAF_CHALLENGE, BOOKING_AWS_WAF_CHALLENGE, 200), true);
+  // Real content is not a challenge.
+  assert.equal(isChallengeResult(REAL_BOOKING_PAGE, "Shibuya STREAM HOTEL", 200), false);
+});
