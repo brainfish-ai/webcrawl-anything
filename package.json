@@ -1,6 +1,6 @@
 {
   "name": "webcrawl-anything",
-  "version": "1.2.7",
+  "version": "1.2.8",
   "private": true,
   "description": "Webcrawl Anything — Open-source search, universal document parser, and crawl engine for AI agents (CLI, SDK, and MCP server)",
   "type": "module",
@@ -25,8 +25,8 @@
     "@firecrawl/pdf-inspector": "^1.25.2",
     "@modelcontextprotocol/sdk": "^1.32.2",
     "@vercel/sandbox": "^1.0.0",
-    "@webcrawl/client": "^1.2.7",
-    "@webcrawl/mcp": "^1.2.7",
+    "@webcrawl/client": "^1.2.8",
+    "@webcrawl/mcp": "^1.2.8",
     "ai": "^7.0.150",
     "impit": "^0.14.7",
     "mammoth": "^1.13.0",
