@@ -26,6 +26,7 @@ export interface ScrapeResult {
 }
 
 const domainCookies = new Map<string, string>();
+const domainUserAgents = new Map<string, string>();
 
 const BROWSER_USER_AGENTS = [
   "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36",
@@ -37,13 +38,12 @@ export function getBrowserHeaders(
   targetUrl: string,
   extraHeaders?: Record<string, string>
 ): Record<string, string> {
-  const ua =
-    BROWSER_USER_AGENTS[
-      Math.abs(hashCode(targetUrl)) % BROWSER_USER_AGENTS.length
-    ];
+  const parsed = new URL(targetUrl);
+  const ua = domainUserAgents.get(parsed.hostname) ?? BROWSER_USER_AGENTS[
+    Math.abs(hashCode(targetUrl)) % BROWSER_USER_AGENTS.length
+  ];
   let hostCookie: string | undefined;
   try {
-    const parsed = new URL(targetUrl);
     hostCookie = domainCookies.get(parsed.hostname);
   } catch {
     // ignore invalid URL
@@ -74,6 +74,17 @@ export function getBrowserHeaders(
 export function setDomainCookie(hostname: string, cookieHeader: string): void {
   if (hostname && cookieHeader) {
     domainCookies.set(hostname, cookieHeader);
+  }
+}
+
+/**
+ * User-Agent paired with a domain's replayed session cookies. Cloudflare's
+ * `cf_clearance` (and similar bound tokens) only validate when the exact UA
+ * that solved the challenge is reused, so replay sets both together.
+ */
+export function setDomainUserAgent(hostname: string, userAgent: string): void {
+  if (hostname && userAgent) {
+    domainUserAgents.set(hostname, userAgent);
   }
 }
 
@@ -200,6 +211,27 @@ export async function fetchWithTlsImpersonation(
   url: string,
   timeoutMs = 12_000
 ): Promise<{ status: number; html: string; headers: Record<string, string> }> {
+  // Session hydration: when a warm stealth session exists for this domain, its
+  // solved cookies (and the UA they were solved under — bound cookies require
+  // the pair) ride the request so the lightweight tier can skip the challenge.
+  let hostname = "";
+  try {
+    hostname = new URL(url).hostname;
+  } catch {
+    /* invalid URL handled below */
+  }
+  if (hostname) {
+    try {
+      const { getWarmSession } = await import("./session.js");
+      const warm = await getWarmSession(hostname);
+      if (warm) {
+        if (warm.cookieHeader) setDomainCookie(hostname, warm.cookieHeader);
+        if (warm.userAgent) setDomainUserAgent(hostname, warm.userAgent);
+      }
+    } catch {
+      /* session module unavailable — plain fetch */
+    }
+  }
   const { res, finalUrl } = await followSafely(url, (hop) =>
     rawGet(hop, getBrowserHeaders(hop), timeoutMs)
   );

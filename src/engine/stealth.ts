@@ -10,6 +10,8 @@
  * Never fabricates content: a page still showing a check comes back `blocked`.
  */
 import { isAntiBotChallenge } from "./fetcher.js";
+import { setDomainCookie, setDomainUserAgent } from "./fetcher.js";
+import { cookieHeaderFrom, getWarmSession, saveWarmSession, WARM_TTL_MS, type CookieLike } from "./session.js";
 import { remoteStealthProvider, type RemoteProvider } from "../interact/remote.js";
 
 export interface StealthDoc {
@@ -72,6 +74,8 @@ export async function stealthFetch(
     followSitemaps?: number;
     /** Allow the paid remote provider. Off for unbilled (anonymous) runs. Default true. */
     remote?: boolean;
+    /** Keep the solved session warm (sandbox left running + cookies saved) for repeat queries. */
+    keepWarm?: boolean;
   } = {}
 ): Promise<StealthResult> {
   const t0 = Date.now();
@@ -80,25 +84,47 @@ export async function stealthFetch(
   }
   const { startBrowser, runBrowserStep, stopBrowser } = await import("../interact/driver.js");
   const provider = opts.remote === false ? null : remoteStealthProvider();
-  const tag = provider ? { provider } : {};
+  const domain = hostOf(entryUrl);
+  // A warm session for this domain means the challenge is already solved: short
+  // solve budget. A cold solve needs the full budget.
+  const hadWarm = provider ? null : await getWarmSession(domain).catch(() => null);
+  const tag = provider ? { provider } : { warm: Boolean(hadWarm) };
   let handle: Awaited<ReturnType<typeof startBrowser>> | null = null;
   // Filled in by `finally` once the provider reports the session cost.
   const out: { result?: StealthResult } = {};
+  let capturedCookies: { name: string; value: string; domain?: string; path?: string; expires?: number }[] = [];
+  let capturedUa = "";
   try {
     const budgetMs = opts.budgetMs ?? 90_000;
-    handle = await startBrowser({ timeoutMs: Math.min(5 * 60_000, budgetMs + 90_000), remote: provider });
+    handle = await startBrowser({
+      timeoutMs: Math.min(5 * 60_000, budgetMs + 90_000),
+      remote: provider,
+      domain: provider ? undefined : domain,
+    });
     const res = await runBrowserStep(handle, {
       type: "fetchMany",
       entry: entryUrl,
       items: items.slice(0, 40),
       budgetMs,
-      solveMs: opts.solveMs ?? 20_000,
+      solveMs: hadWarm ? Math.min(opts.solveMs ?? 20_000, 8_000) : (opts.solveMs ?? 20_000),
       followSitemaps: opts.followSitemaps ?? 0,
     });
     if (!res.ok) {
       out.result = { solved: false, entry: null, docs: [], durationMs: 0, error: res.error || "Stealth browser step failed", ...tag };
     } else {
-      const value = (res.data?.value ?? {}) as { entry?: StealthDoc | null; docs?: StealthDoc[]; solved?: boolean };
+      const value = (res.data?.value ?? {}) as {
+        entry?: StealthDoc | null;
+        docs?: StealthDoc[];
+        solved?: boolean;
+        userAgent?: string;
+        cookies?: { name: string; value: string; domain?: string; path?: string; expires?: number }[];
+      };
+      capturedCookies = Array.isArray(value.cookies) ? value.cookies : [];
+      capturedUa = value.userAgent ?? "";
+      if (capturedUa) setDomainUserAgent(domain, capturedUa);
+      if (capturedCookies.length > 0) {
+        setDomainCookie(domain, cookieHeaderFrom(capturedCookies));
+      }
       out.result = {
         solved: Boolean(value.solved),
         entry: value.entry ?? null,
@@ -110,8 +136,31 @@ export async function stealthFetch(
   } catch (err) {
     out.result = { solved: false, entry: null, docs: [], durationMs: 0, error: err instanceof Error ? err.message : String(err), ...tag };
   } finally {
-    const cost = handle ? await stopBrowser(handle).catch(() => null) : null;
+    const solved = out.result?.solved === true;
+    const keepWarm = !provider && solved && (opts.keepWarm ?? true) && Boolean(handle && handle.kind === "sandbox" && capturedUa);
+    const cost = handle
+      ? await stopBrowser(handle, {
+          keepWarm,
+          domain,
+          userAgent: capturedUa,
+          cookieHeader: capturedCookies.length > 0 ? cookieHeaderFrom(capturedCookies) : "",
+        }).catch(() => null)
+      : null;
     if (out.result && cost) out.result.providerCostUsd = cost.costUsd;
+    if (!keepWarm && solved && capturedCookies.length > 0) {
+      // Even without a warm sandbox, remember the solved cookies for replay on
+      // the lightweight tier (UA-paired; rejection there just escalates).
+      await saveWarmSession({ domain, sandboxId: "", userAgent: capturedUa, cookieHeader: cookieHeaderFrom(capturedCookies), expiresAt: Date.now() + WARM_TTL_MS })
+        .catch(() => {});
+    }
+    console.info("[stealth] session result", {
+      domain,
+      solved,
+      warm: Boolean(hadWarm),
+      keepWarm,
+      cookieCount: capturedCookies.length,
+      durationMs: Date.now() - t0,
+    });
   }
   const result = out.result!;
   result.durationMs = Date.now() - t0;
@@ -126,6 +175,15 @@ export async function stealthFetch(
     });
   }
   return result;
+}
+
+/** Hostname of a URL, or "" when unparseable. */
+function hostOf(url: string): string {
+  try {
+    return new URL(url).hostname;
+  } catch {
+    return "";
+  }
 }
 
 /** Extracts `<loc>` entries from a sitemap or sitemap index. */

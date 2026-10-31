@@ -25,6 +25,7 @@ import {
   type StepResultLine,
 } from "./vm.js";
 import { startRemoteSession, stopRemoteSession, type RemoteProvider, type RemoteSessionCost } from "./remote.js";
+import { WARM_SANDBOX_TIMEOUT_MS, WARM_TTL_MS } from "../engine/session.js";
 
 /** Where STEP_SCRIPT runs when the browser itself is hosted by a remote provider. */
 export type StepRunner = { kind: "sandbox"; sandboxId: string } | { kind: "local"; scriptPath: string; playwright: string };
@@ -121,6 +122,42 @@ async function startSandboxBrowser(opts: { timeoutMs: number; userAgent?: string
   } catch (err) {
     await sandbox.stop().catch(() => {});
     throw err;
+  }
+}
+
+/** True when the sandbox's Chromium still answers on CDP (warm reconnect check). */
+async function sandboxChromeAlive(sandbox: Sandbox): Promise<boolean> {
+  const ping = await sh(sandbox, `curl -sf -m 3 http://127.0.0.1:${CDP_PORT}/json/version >/dev/null && echo alive`, false);
+  return ping.exitCode === 0 && ping.stdout.includes("alive");
+}
+
+/**
+ * Warm reconnect: fetch the sandbox this domain solved its challenge in, verify
+ * Chromium still lives, and reuse it (same IP, same UA, same cleared cookies).
+ * Returns null when no warm entry exists or the sandbox is gone (cold boot).
+ */
+async function startWarmSandboxBrowser(domain: string): Promise<BrowserHandle | null> {
+  if (!domain) return null;
+  const { getWarmSession } = await import("../engine/session.js");
+  let warm: Awaited<ReturnType<typeof getWarmSession>>;
+  try {
+    warm = await getWarmSession(domain);
+  } catch {
+    return null;
+  }
+  if (!warm || !warm.sandboxId) return null;
+  try {
+    const sandbox = await Sandbox.get({ sandboxId: warm.sandboxId });
+    if (!(await sandboxChromeAlive(sandbox))) {
+      await sandbox.stop().catch(() => {});
+      return null;
+    }
+    // Refresh the step runner in case this instance ships newer code.
+    await sandbox.writeFiles([{ path: STEP_SCRIPT_PATH, content: Buffer.from(STEP_SCRIPT) }]).catch(() => {});
+    console.info("[stealth] warm reconnect", { domain, sandboxId: warm.sandboxId });
+    return { kind: "sandbox", sandboxId: warm.sandboxId };
+  } catch {
+    return null;
   }
 }
 
@@ -238,12 +275,22 @@ async function stopRunner(runner: StepRunner): Promise<void> {
 /* --------------------------------- public --------------------------------- */
 
 export async function startBrowser(
-  opts: { timeoutMs?: number; userAgent?: string; remote?: RemoteProvider | null } = {}
+  opts: { timeoutMs?: number; userAgent?: string; remote?: RemoteProvider | null; domain?: string } = {}
 ): Promise<BrowserHandle> {
   if (opts.remote) return startRemoteBrowser(opts.remote, opts.timeoutMs ?? 5 * 60_000);
   if (localMode()) return startLocalBrowser(opts);
   if (!interactBrowserAvailable()) throw new Error("browser_unavailable");
-  return startSandboxBrowser({ timeoutMs: opts.timeoutMs ?? 5 * 60_000, userAgent: opts.userAgent });
+  // Warm reconnect first: a sandbox that already solved this domain's bot check
+  // keeps its IP / UA / cleared cookies — reusing it skips boot + re-solve.
+  if (opts.domain) {
+    const warm = await startWarmSandboxBrowser(opts.domain).catch(() => null);
+    if (warm) return warm;
+  }
+  return startSandboxBrowser({
+    // Long VM timeout headroom so the sandbox can stay warm after this call.
+    timeoutMs: Math.max(opts.timeoutMs ?? 5 * 60_000, WARM_SANDBOX_TIMEOUT_MS),
+    userAgent: opts.userAgent,
+  });
 }
 
 function runLocalStep(
@@ -287,8 +334,18 @@ export async function runBrowserStep(handle: BrowserHandle, action: StepAction):
   return runSandboxStep(handle.sandboxId, action);
 }
 
-/** Stops the browser. For a remote provider, returns what the session cost (null when unknown). */
-export async function stopBrowser(handle: BrowserHandle): Promise<RemoteSessionCost | null> {
+/**
+ * Stops the browser. For a remote provider, returns what the session cost (null
+ * when unknown). With `keepWarm`, a sandbox browser is left running and
+ * registered (domain + sandboxId + UA) so the next call reconnects to it via
+ * `Sandbox.get` instead of cold-booting — the caller must pass `domain`.
+ * Evicted warm entries (over the cap) are stopped here so idle compute
+ * does not linger.
+ */
+export async function stopBrowser(
+  handle: BrowserHandle,
+  opts: { keepWarm?: boolean; domain?: string; userAgent?: string; cookieHeader?: string } = {}
+): Promise<RemoteSessionCost | null> {
   if (handle.kind === "local") {
     try {
       process.kill(handle.pid);
@@ -300,6 +357,32 @@ export async function stopBrowser(handle: BrowserHandle): Promise<RemoteSessionC
   if (handle.kind === "remote") {
     const [cost] = await Promise.all([stopRemoteSession(handle), stopRunner(handle.runner)]);
     return cost;
+  }
+  if (opts.keepWarm && opts.domain) {
+    const { saveWarmSession } = await import("../engine/session.js");
+    try {
+      const evicted = await saveWarmSession({
+        domain: opts.domain,
+        sandboxId: handle.sandboxId,
+        userAgent: opts.userAgent ?? "",
+        cookieHeader: opts.cookieHeader ?? "",
+        expiresAt: Date.now() + WARM_TTL_MS,
+      });
+      await Promise.all(
+        evicted.map(async (id) => {
+          try {
+            const sandbox = await Sandbox.get({ sandboxId: id });
+            await sandbox.stop();
+          } catch {
+            /* already stopped */
+          }
+        })
+      );
+      console.info("[stealth] kept warm", { domain: opts.domain, sandboxId: handle.sandboxId, evicted: evicted.length });
+      return null;
+    } catch {
+      /* registry unavailable — fall through to full stop */
+    }
   }
   await stopRunner(handle);
   return null;

@@ -266,7 +266,16 @@ try {
           docs.push({ url, ok: false, error: String(e && e.message || e).split("\n")[0].slice(0, 300) });
         }
       }
-      data = { value: { entry, docs, solved: entry ? !entry.blocked : true, userAgent: ua } };
+      // Session capture: cookies + UA ride the result so the solved session can
+      // be replayed on the lightweight tier or the sandbox kept warm + reconnected.
+      let cookies = [];
+      try {
+        cookies = (await ctx.cookies())
+          .filter((c) => !c.expires || c.expires > Date.now() / 1000)
+          .slice(0, 50)
+          .map((c) => ({ name: c.name, value: c.value, domain: c.domain, path: c.path, expires: c.expires }));
+      } catch {}
+      data = { value: { entry, docs, solved: entry ? !entry.blocked : true, userAgent: ua, cookies } };
       break;
     }
     default:

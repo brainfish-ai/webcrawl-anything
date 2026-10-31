@@ -1,5 +1,6 @@
 import { fastHtmlToMarkdown, setDomainCookie } from "./engine.js";
 import { isAntiBotChallenge } from "./engine/fetcher.js";
+import { getWarmSession, isDomainChallenged, markDomainChallenged } from "./engine/session.js";
 
 export interface BrowserEscalationResult {
   html: string;
@@ -111,6 +112,19 @@ export async function escalateToSandboxOrBrowser(
 
   // Option B: Vercel Sandbox microVM execution (`@vercel/sandbox`)
   if (vercelSandboxAvailable()) {
+    // Challenge memo: curl can never solve a JS challenge, so for domains known
+    // to serve one (or with a warm solved session) skip this tier entirely and
+    // save its ~4-6 s sandbox boot.
+    let host = "";
+    try {
+      host = new URL(url).hostname;
+    } catch {
+      /* fall through to curl */
+    }
+    const skipCurlTier = host
+      ? (await isDomainChallenged(host).catch(() => false)) || Boolean(await getWarmSession(host).catch(() => null))
+      : false;
+    if (!skipCurlTier) {
     try {
       const { Sandbox } = await import("@vercel/sandbox");
       const sandbox = await Sandbox.create({
@@ -175,11 +189,15 @@ export async function escalateToSandboxOrBrowser(
             };
           }
         }
+        // The clean-VM curl could not produce content: this domain serves a JS
+        // challenge (or similar), so memo it and skip this tier next time.
+        if (host) await markDomainChallenged(host).catch(() => {});
       } finally {
         await sandbox.stop().catch(() => {});
       }
     } catch {
       // Sandbox unavailable or not configured in this environment
+    }
     }
   }
 
