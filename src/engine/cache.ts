@@ -27,6 +27,15 @@ interface ExternalCacheDb {
 }
 
 let cachedDbPromise: Promise<ExternalCacheDb | null> | null = null;
+
+/**
+ * Registers an external L3 cache database store (e.g., Supabase Postgres in webcrawl.app cloud)
+ * when the engine is consumed as an installed npm package (`webcrawl/engine/cache`).
+ */
+export function registerExternalCacheDb(db: ExternalCacheDb | null): void {
+  cachedDbPromise = Promise.resolve(db);
+}
+
 function getOptionalDb(): Promise<ExternalCacheDb | null> {
   if (!cachedDbPromise) {
     const dbModulePath = "../db/index.js";

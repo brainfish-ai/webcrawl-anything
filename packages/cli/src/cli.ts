@@ -309,8 +309,9 @@ async function resolveBackendClient(
     });
   }
   try {
-    const localEngineSpec = ["..", "..", "..", "src", "local-engine.js"].join("/");
-    const localMod = (await import(localEngineSpec)) as {
+    const packagedSpec = ["./core/local-engine.js"].join("");
+    const fallbackSpec = ["..", "..", "..", "src", "local-engine.js"].join("/");
+    const localMod = (await import(packagedSpec).catch(() => import(fallbackSpec))) as {
       createLocalEngineClient: () => BackendClient;
     };
     return localMod.createLocalEngineClient();
