@@ -1,6 +1,6 @@
 {
   "name": "@webcrawl/mcp",
-  "version": "1.2.4",
+  "version": "1.2.5",
   "description": "MCP server for Webcrawl Anything — zero-key local engine or webcrawl.app cloud (search, scrape, parse PDF/Office/YouTube, map, crawl, extract, rerank)",
   "type": "module",
   "license": "MIT",
@@ -52,7 +52,7 @@
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.32.2",
-    "@webcrawl/client": "^1.2.4",
+    "@webcrawl/client": "^1.2.5",
     "zod": "^4.0.0"
   },
   "engines": {
