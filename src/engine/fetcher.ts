@@ -1,0 +1,267 @@
+import { followSafely, UnsafeUrlError } from "./safe-url.js";
+
+export interface ScrapeOptions {
+  url: string;
+  formats?: Array<"markdown" | "html" | "links">;
+  retainImages?: "all" | "none";
+  removeSelectors?: string[];
+  render?: boolean;
+  timeout?: number;
+  bypassCache?: boolean;
+  cache?: boolean;
+}
+
+export interface ScrapeResult {
+  success: boolean;
+  url: string;
+  title: string;
+  markdown: string;
+  html?: string;
+  links?: string[];
+  statusCode: number;
+  contentHash: string;
+  tier: "cache" | "static" | "sandbox" | "cloudflare" | "browser";
+  latencyMs: number;
+  error?: string;
+}
+
+const domainCookies = new Map<string, string>();
+
+const BROWSER_USER_AGENTS = [
+  "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36",
+  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36",
+  "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36",
+];
+
+export function getBrowserHeaders(
+  targetUrl: string,
+  extraHeaders?: Record<string, string>
+): Record<string, string> {
+  const ua =
+    BROWSER_USER_AGENTS[
+      Math.abs(hashCode(targetUrl)) % BROWSER_USER_AGENTS.length
+    ];
+  let hostCookie: string | undefined;
+  try {
+    const parsed = new URL(targetUrl);
+    hostCookie = domainCookies.get(parsed.hostname);
+  } catch {
+    // ignore invalid URL
+  }
+
+  return {
+    "User-Agent": ua,
+    Accept:
+      "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
+    "Accept-Language": "en-US,en;q=0.9",
+    "Accept-Encoding": "gzip, deflate, br",
+    "Cache-Control": "no-cache",
+    Pragma: "no-cache",
+    "Sec-Ch-Ua":
+      '"Chromium";v="136", "Google Chrome";v="136", "Not.A/Brand";v="99"',
+    "Sec-Ch-Ua-Mobile": "?0",
+    "Sec-Ch-Ua-Platform": '"macOS"',
+    "Sec-Fetch-Dest": "document",
+    "Sec-Fetch-Mode": "navigate",
+    "Sec-Fetch-Site": "none",
+    "Sec-Fetch-User": "?1",
+    "Upgrade-Insecure-Requests": "1",
+    ...(hostCookie ? { Cookie: hostCookie } : {}),
+    ...extraHeaders,
+  };
+}
+
+export function setDomainCookie(hostname: string, cookieHeader: string): void {
+  if (hostname && cookieHeader) {
+    domainCookies.set(hostname, cookieHeader);
+  }
+}
+
+function hashCode(str: string): number {
+  let hash = 0;
+  for (let i = 0; i < str.length; i++) {
+    hash = (hash << 5) - hash + str.charCodeAt(i);
+    hash |= 0;
+  }
+  return hash;
+}
+
+export function isAntiBotChallenge(html: string, status: number): boolean {
+  if (status === 403 || status === 429 || status === 503) {
+    return true;
+  }
+  const lower = html.slice(0, 6000).toLowerCase();
+  return (
+    lower.includes("cf-browser-verification") ||
+    lower.includes("challenge-platform") ||
+    lower.includes("just a moment...") ||
+    lower.includes("vercel security checkpoint") ||
+    lower.includes("_vercel/security") ||
+    lower.includes("enable javascript and cookies to continue") ||
+    lower.includes("_cf_chl_opt")
+  );
+}
+
+let sharedImpit: any = null;
+
+interface RawHop {
+  status: number;
+  headers: Record<string, string>;
+  body: ArrayBuffer;
+}
+
+/** One request, redirects NOT followed (callers validate each hop via followSafely). */
+async function rawGet(
+  url: string,
+  reqHeaders: Record<string, string>,
+  timeoutMs: number,
+  maxBytes?: number
+): Promise<RawHop> {
+  const read = async (
+    status: number,
+    headers: Record<string, string>,
+    getBuf: () => Promise<ArrayBuffer>
+  ): Promise<RawHop> => {
+    const isRedirect = status >= 300 && status < 400 && !!headers["location"];
+    if (!isRedirect && maxBytes !== undefined) checkDeclaredLength(headers, maxBytes);
+    return { status, headers, body: isRedirect ? new ArrayBuffer(0) : await getBuf() };
+  };
+  try {
+    if (!sharedImpit) {
+      const impitMod = await import("impit");
+      sharedImpit = new impitMod.Impit({
+        browser: "chrome",
+        ignoreTlsErrors: true,
+        timeout: timeoutMs,
+      });
+    }
+    const res = await sharedImpit.fetch(url, {
+      method: "GET",
+      headers: reqHeaders,
+      timeout: timeoutMs,
+      redirect: "manual",
+    });
+    return await read(res.status, headersToObject(res.headers), () => res.arrayBuffer());
+  } catch (err) {
+    if (err instanceof ResourceTooLargeError || err instanceof UnsafeUrlError) throw err;
+    const res = await fetch(url, {
+      headers: reqHeaders,
+      redirect: "manual",
+      signal: AbortSignal.timeout(timeoutMs),
+    });
+    return await read(res.status, headersToObject(res.headers), () => res.arrayBuffer());
+  }
+}
+
+/**
+ * Fetches a URL using `impit` (BoringSSL Chrome 136 TLS JA3/JA4 + HTTP/2 fingerprint impersonation)
+ * so Cloudflare Bot Management and Vercel Security Checkpoint treat requests as real Chrome.
+ * Falls back to standard `fetch` if `impit` is unavailable on the current platform.
+ * Every redirect hop is checked against the SSRF guard.
+ */
+export async function fetchWithTlsImpersonation(
+  url: string,
+  timeoutMs = 12_000
+): Promise<{ status: number; html: string; headers: Record<string, string> }> {
+  const { res, finalUrl } = await followSafely(url, (hop) =>
+    rawGet(hop, getBrowserHeaders(hop), timeoutMs)
+  );
+  if (res.headers["set-cookie"]) {
+    try {
+      setDomainCookie(new URL(finalUrl).hostname, res.headers["set-cookie"].split(";")[0]);
+    } catch {
+      // ignore
+    }
+  }
+  return {
+    status: res.status,
+    html: new TextDecoder().decode(res.body),
+    headers: res.headers,
+  };
+}
+
+export interface FetchedResource {
+  status: number;
+  headers: Record<string, string>;
+  /** Declared content type without parameters, lower-cased ("" when missing). */
+  contentType: string;
+  body: Uint8Array;
+  /** Final URL after redirects when the transport reports it. */
+  url: string;
+}
+
+export class ResourceTooLargeError extends Error {
+  constructor(public readonly bytes: number, public readonly maxBytes: number) {
+    super(`File is ${(bytes / 1e6).toFixed(1)} MB; the limit is ${(maxBytes / 1e6).toFixed(0)} MB`);
+    this.name = "ResourceTooLargeError";
+  }
+}
+
+/** Largest download accepted for any file (the per-type caps in src/parse/limits.ts are tighter). */
+export const MAX_RESOURCE_BYTES = 100 * 1024 * 1024;
+
+function headersToObject(headers: unknown): Record<string, string> {
+  const out: Record<string, string> = {};
+  const h = headers as { forEach?: (cb: (v: string, k: string) => void) => void };
+  if (h && typeof h.forEach === "function") {
+    h.forEach((v, k) => {
+      out[String(k).toLowerCase()] = String(v);
+    });
+  }
+  return out;
+}
+
+function checkDeclaredLength(headers: Record<string, string>, maxBytes: number): void {
+  const declared = Number(headers["content-length"]);
+  if (Number.isFinite(declared) && declared > maxBytes) {
+    throw new ResourceTooLargeError(declared, maxBytes);
+  }
+}
+
+/**
+ * Binary-safe GET. Same TLS impersonation as `fetchWithTlsImpersonation`, but keeps
+ * the body as bytes so PDFs, Office files, images and media survive intact.
+ */
+export async function fetchResource(
+  url: string,
+  options: { timeoutMs?: number; maxBytes?: number } = {}
+): Promise<FetchedResource> {
+  const timeoutMs = options.timeoutMs ?? 30_000;
+  const maxBytes = options.maxBytes ?? MAX_RESOURCE_BYTES;
+  const { res, finalUrl } = await followSafely(url, (hop) =>
+    rawGet(hop, { ...getBrowserHeaders(hop), Accept: "*/*" }, timeoutMs, maxBytes)
+  );
+  if (res.body.byteLength > maxBytes) throw new ResourceTooLargeError(res.body.byteLength, maxBytes);
+  return {
+    status: res.status,
+    headers: res.headers,
+    contentType: (res.headers["content-type"] || "").split(";")[0].trim().toLowerCase(),
+    body: new Uint8Array(res.body),
+    url: finalUrl,
+  };
+}
+
+/**
+ * Detects whether an HTML response is an empty SPA shell or a Cloudflare/WAF challenge page
+ * that requires headless browser / Vercel Sandbox escalation.
+ */
+export function needsBrowserEscalation(
+  status: number,
+  html: string,
+  markdown: string
+): boolean {
+  if (isAntiBotChallenge(html, status)) {
+    return true;
+  }
+  const lower = html.slice(0, 6000).toLowerCase();
+  // Empty SPA shell check (<div id="root"></div> or <div id="app"></div> with almost no text)
+  if (
+    markdown.length < 120 &&
+    (lower.includes('id="root"') ||
+      lower.includes('id="app"') ||
+      lower.includes('id="__next"'))
+  ) {
+    return true;
+  }
+  return false;
+}
