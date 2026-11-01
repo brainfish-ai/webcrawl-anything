@@ -38,7 +38,7 @@ npx webcrawl search "sony wh-1000xm5" -c shopping
    ]
    ```
 2. **Baseline pass.** Scrape each item once; `extract --prompt "product title, current price, list/strikethrough price, availability, seller, shipping"`; store `{price, availability, checkedAt}` in `state.json`.
-3. **Schedule re-checks.** Cron or an agent scheduler: every 30-60 min during Black Friday/Cyber week, 2-4x/day otherwise. Retailer pages are protected — the anti-bot ladder (see webcrawl-protected-sites) handles this, but keep frequencies polite (15+ min minimum between hits on the same domain).
+3. **Schedule re-checks.** Cron or an agent scheduler: every 30-60 min during Black Friday/Cyber week, 2-4x/day otherwise. Always pass `--no-cache` on scheduled re-checks — the engine caches pages by content hash and will replay the first fetch (stale prices) otherwise. Retailer pages are protected — the anti-bot ladder (see webcrawl-protected-sites) handles bot-check challenges, but not JS-rendering (see validation loop); keep frequencies polite (15+ min minimum between hits on the same domain).
 4. **Evaluate triggers.** Alert when: price ≤ target; price dropped >10% since last check; availability flipped out-of-stock → in-stock. Ignore tiny fluctuations (recompute all-in price).
 5. **Push to mobile — ntfy.sh (free, no signup):**
    ```bash
@@ -62,7 +62,8 @@ npx webcrawl search "sony wh-1000xm5" -c shopping
 - Spot-check one extracted price against the live page (title + price match).
 - Confirm state.json updates each run (no duplicate alerts for the same price).
 - If a product page returns a challenge shell, verify the protected-sites ladder is enabled before treating it as "no price found".
-- If `extract` returns a near-empty shell (site tagline, 0 links, no price) with no bot-check, the page is JS-rendered: zero-key local mode fetches it but does not render JS. Check `npx webcrawl doctor`, use the real-browser tier from webcrawl-protected-sites, or `npx webcrawl login --email <addr>` + `--mode cloud` for the remote stealth tier that renders JS. Never read an empty local result as "out of stock" — it's a rendering gap, not a page fact.
+- If `extract` returns a near-empty shell (site tagline, 0 links, no price), the page renders client-side: **neither zero-key local nor logged-in cloud mode renders JS listings today** — verified live (a StubHub shell returned HTTP 403 at `tier: "static"` even in cloud mode). Never read an empty result as "out of stock" — it's a rendering gap, not a page fact.
+- Build the watchlist only from pages that serve real HTML: verify each URL with `npx webcrawl scrape <url>` and keep the URLs whose product text appears. For JS-only product pages, a headless browser outside this skill is the only path.
 
 ## Compliance
 

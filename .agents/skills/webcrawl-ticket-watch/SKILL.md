@@ -29,7 +29,7 @@ npx webcrawl extract "https://www.stubhub.com/chicago-cubs-tickets/venue/8660/" 
 
 1. **Set the watchlist.** For each event: URL, target price (all-in, per ticket), and optional seat preferences (section/quantity).
 2. **Baseline read.** Scrape once and extract current listings with `extract --prompt "…all-in price, section, quantity…"`. Record the baseline in a small JSON state file (`{url, targetPrice, lastPrice, lastChecked}`).
-3. **Schedule re-checks.** Re-run every 15-60 min during on-sales and price-drop windows (cron: `*/30 * * * *`, or an agent scheduler). Event pages change fast; don't poll faster than every 10-15 min — keep it polite.
+3. **Schedule re-checks.** Re-run every 15-60 min during on-sales and price-drop windows (cron: `*/30 * * * *`, or an agent scheduler). Always pass `--no-cache` on scheduled re-checks — the engine caches pages by content hash and will replay the first fetch (stale prices) otherwise. Event pages change fast; don't poll faster than every 10-15 min — keep it polite.
 4. **Evaluate the trigger.** Compare extracted all-in price against the target. Fire the alert only on a meaningful change (below target, or a drop >5% since last check, or sold-out → available flip).
 5. **Push to mobile (ntfy.sh — free, no signup):**
    ```bash
@@ -47,9 +47,10 @@ npx webcrawl extract "https://www.stubhub.com/chicago-cubs-tickets/venue/8660/" 
 
 ## If prices are missing
 
-- If `extract` returns only the site tagline with 0 links and no listings, the page is JS-rendered. In zero-key local mode the static tier fetches the page but does not render JS, and no bot-check fires — so the anti-bot ladder has nothing to escalate on and will not fix this by itself.
-- Check tier readiness with `npx webcrawl doctor`. For JS-rendered event pages, use the real-browser tier from the ladder (see webcrawl-protected-sites) or sign in and run cloud mode (`npx webcrawl login --email <addr>`, then add `--mode cloud`) — the remote stealth tier renders JS listing pages.
-- Do not treat an empty local result as "sold out" or "no listings" — that is a rendering gap, not a page fact.
+- If `extract` returns only the site tagline / a "Please enable JS" shell with 0 links and no listings, the page renders its listings client-side. **Neither local nor cloud mode renders it today** — verified live: StubHub venue pages return that shell at `tier: "static"`, HTTP 403, in both zero-key local and logged-in cloud modes; the scrape path does not auto-escalate to a headless browser.
+- Do not treat an empty result as "sold out" — that is a rendering gap, not a page fact. Do not retry blindly; a different tier won't change it.
+- Working path: build the watchlist only from event pages that serve real listing HTML. Verify each URL with `npx webcrawl scrape <url>` first — if listing text (event names, sections, prices) comes back, `extract` will work; if only the tagline comes back, that URL cannot be monitored with these commands.
+- JS-only event pages need a headless browser run outside this skill.
 
 ## Validation loop
 
