@@ -17,7 +17,7 @@ Your agent re-checks your personal watchlist on a schedule, extracts the real al
 ## Quick start
 
 ```bash
-# Read a product page right now (works on major retailers)
+# Read a product page right now (JS-rendered retailers: see validation loop below)
 npx webcrawl scrape https://www.amazon.com/dp/B0CHX1W1XY
 
 # Structured price extraction
@@ -62,6 +62,7 @@ npx webcrawl search "sony wh-1000xm5" -c shopping
 - Spot-check one extracted price against the live page (title + price match).
 - Confirm state.json updates each run (no duplicate alerts for the same price).
 - If a product page returns a challenge shell, verify the protected-sites ladder is enabled before treating it as "no price found".
+- If `extract` returns a near-empty shell (site tagline, 0 links, no price) with no bot-check, the page is JS-rendered: zero-key local mode fetches it but does not render JS. Check `npx webcrawl doctor`, use the real-browser tier from webcrawl-protected-sites, or `npx webcrawl login --email <addr>` + `--mode cloud` for the remote stealth tier that renders JS. Never read an empty local result as "out of stock" — it's a rendering gap, not a page fact.
 
 ## Compliance
 

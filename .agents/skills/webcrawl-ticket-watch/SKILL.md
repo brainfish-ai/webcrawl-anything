@@ -17,7 +17,7 @@ Event pages (StubHub, Ticketmaster, SeatGeek, venue sites) commonly challenge au
 ## Quick start
 
 ```bash
-# Read an event page now (the anti-bot ladder handles the challenge)
+# Read an event page now (challenge-protected sites: see "If prices are missing" below)
 npx webcrawl scrape https://www.stubhub.com/chicago-cubs-tickets/venue/8660/
 
 # Structured extraction of the listings you care about
@@ -43,8 +43,13 @@ npx webcrawl extract "https://www.stubhub.com/chicago-cubs-tickets/venue/8660/" 
 ## Extracting prices
 
 - Use the all-in price (with fees) — that's what the user pays; list price alone misleads.
-- If `extract` can't find prices in Markdown, the page may be JS-rendered — the stealth tier handles it (see webcrawl-protected-sites).
 - Store `checkedAt`, `price`, `currency`, `sections available`, and the URL in state.
+
+## If prices are missing
+
+- If `extract` returns only the site tagline with 0 links and no listings, the page is JS-rendered. In zero-key local mode the static tier fetches the page but does not render JS, and no bot-check fires — so the anti-bot ladder has nothing to escalate on and will not fix this by itself.
+- Check tier readiness with `npx webcrawl doctor`. For JS-rendered event pages, use the real-browser tier from the ladder (see webcrawl-protected-sites) or sign in and run cloud mode (`npx webcrawl login --email <addr>`, then add `--mode cloud`) — the remote stealth tier renders JS listing pages.
+- Do not treat an empty local result as "sold out" or "no listings" — that is a rendering gap, not a page fact.
 
 ## Validation loop
 
