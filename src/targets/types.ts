@@ -23,6 +23,7 @@ export type TargetTier =
   | "static"
   | "impit-tls"
   | "impersonate"
+  | "proxy-impersonate"
   | "cloudflare"
   | "stealth-browser"
   | "sandbox"

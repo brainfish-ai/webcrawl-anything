@@ -37,6 +37,9 @@ export interface ExternalSessionStore {
   deleteWarmSession(domain: string): Promise<void>;
   markDomainChallenged(domain: string): Promise<void>;
   isDomainChallenged(domain: string): Promise<boolean>;
+  /** Optional persistence for the residential-proxy memo (Tier P1). */
+  markDomainProxyNeeded?(domain: string): Promise<void>;
+  isDomainProxyNeeded?(domain: string): Promise<boolean>;
 }
 
 /** How long a solved session is offered for warm reconnect / cookie replay. */
@@ -47,6 +50,8 @@ export const WARM_SANDBOX_TIMEOUT_MS = 10 * 60_000;
 export const WARM_CAP = 4;
 /** How long a domain stays on the JS-challenge memo. */
 export const CHALLENGE_MEMO_TTL_MS = 30 * 60_000;
+/** How long a domain stays on the residential-proxy memo (Tier P1). */
+export const PROXY_MEMO_TTL_MS = 60 * 60_000;
 
 let external: ExternalSessionStore | null = null;
 
@@ -56,10 +61,12 @@ export function registerExternalSessionStore(store: ExternalSessionStore): void 
 
 const warm = new Map<string, WarmSession>();
 const challenged = new Map<string, number>();
+const proxyNeeded = new Map<string, number>();
 
 function reap(now = Date.now()): void {
   for (const [d, s] of warm) if (s.expiresAt <= now) warm.delete(d);
   for (const [d, t] of challenged) if (t <= now) challenged.delete(d);
+  for (const [d, t] of proxyNeeded) if (t <= now) proxyNeeded.delete(d);
 }
 
 export interface CookieLike {
@@ -169,8 +176,45 @@ export async function isDomainChallenged(domain: string): Promise<boolean> {
   return false;
 }
 
+/**
+ * Marks a domain as needing the residential-proxy tier (Tier P1): every
+ * datacenter egress attempt is blocked by IP reputation (DataDome et al), so
+ * future ladder runs skip straight to the proxy hop.
+ */
+export async function markDomainProxyNeeded(domain: string): Promise<void> {
+  if (!domain) return;
+  proxyNeeded.set(domain, Date.now() + PROXY_MEMO_TTL_MS);
+  if (external?.markDomainProxyNeeded) {
+    try {
+      await external.markDomainProxyNeeded(domain);
+    } catch {
+      /* store unavailable */
+    }
+  }
+}
+
+export async function isDomainProxyNeeded(domain: string): Promise<boolean> {
+  if (!domain) return false;
+  reap();
+  const until = proxyNeeded.get(domain);
+  if (until && until > Date.now()) return true;
+  if (until) proxyNeeded.delete(domain);
+  if (external?.isDomainProxyNeeded) {
+    try {
+      if (await external.isDomainProxyNeeded(domain)) {
+        proxyNeeded.set(domain, Date.now() + PROXY_MEMO_TTL_MS);
+        return true;
+      }
+    } catch {
+      /* store unavailable */
+    }
+  }
+  return false;
+}
+
 /** Test helper: resets all in-memory state (external stores are untouched). */
 export function resetSessionStateForTests(): void {
   warm.clear();
   challenged.clear();
+  proxyNeeded.clear();
 }

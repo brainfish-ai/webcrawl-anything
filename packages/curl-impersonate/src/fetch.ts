@@ -23,6 +23,8 @@ export interface ImpersonateFetchResult {
   contentType: string;
   /** Decompressed body bytes (the binary handles gzip/br/zstd itself). */
   body: Uint8Array;
+  /** Decompressed body size in bytes (body.length) — for bandwidth accounting. */
+  bytes: number;
 }
 
 export class ResourceTooLargeError extends Error {
@@ -57,6 +59,12 @@ export interface ImpersonateFetchOptions {
   timeoutMs?: number;
   /** Declared-length guard before the body is accepted. */
   maxBytes?: number;
+  /**
+   * HTTP(S) proxy URL (credentials embedded, `http://user:pass@host:port`).
+   * Routes the hop through e.g. a residential proxy so the target sees a
+   * clean egress IP while the TLS fingerprint stays a real Chrome's.
+   */
+  proxy?: string;
 }
 
 let cachedBinary: string | null | undefined;
@@ -128,6 +136,7 @@ export async function impersonateFetch(
     headers = {},
     timeoutMs = 12_000,
     maxBytes,
+    proxy,
   } = options;
 
   const navHeaders = profileHeaders(profile, headers);
@@ -154,6 +163,7 @@ export async function impersonateFetch(
           "-w", "%{http_code}",
           url,
           ...headerArgs,
+          ...(proxy ? ["-x", proxy] : []),
         ],
         { stdio: ["ignore", "pipe", "pipe"] }
       );
@@ -210,6 +220,7 @@ export async function impersonateFetch(
         .trim()
         .toLowerCase(),
       body,
+      bytes: body.byteLength,
     };
   } finally {
     rmSync(dir, { recursive: true, force: true });

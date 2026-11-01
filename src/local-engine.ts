@@ -216,7 +216,11 @@ export function createLocalEngineClient(): LocalEngineBackend {
         },
         evidence: {
           ...targetInspection.evidence,
-          tier: lastFetchTier() === "impersonate" ? "impersonate" : "impit-tls",
+          tier: lastFetchTier() === "impersonate"
+            ? "impersonate"
+            : lastFetchTier() === "proxy-impersonate"
+              ? "proxy-impersonate"
+              : "impit-tls",
           contentHash,
           latencyMs: Date.now() - start,
         },

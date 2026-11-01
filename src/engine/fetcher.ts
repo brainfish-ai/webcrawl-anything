@@ -1,4 +1,8 @@
 import { followSafely, UnsafeUrlError } from "./safe-url.js";
+import {
+  isDomainProxyNeeded,
+  markDomainProxyNeeded,
+} from "./session.js";
 
 export interface ScrapeOptions {
   url: string;
@@ -20,7 +24,7 @@ export interface ScrapeResult {
   links?: string[];
   statusCode: number;
   contentHash: string;
-  tier: "cache" | "static" | "sandbox" | "cloudflare" | "browser" | "impersonate";
+  tier: "cache" | "static" | "sandbox" | "cloudflare" | "browser" | "impersonate" | "proxy-impersonate";
   latencyMs: number;
   error?: string;
 }
@@ -170,12 +174,35 @@ interface RawHop {
   body: ArrayBuffer;
 }
 
-/** Tier that won the most recent rawGet ladder ("impit-tls" → "impersonate" → "fetch"). */
-let lastTier: "impit-tls" | "impersonate" | "fetch" = "impit-tls";
+/** Tier that won the most recent rawGet ladder ("impit-tls" → "impersonate" → "proxy-impersonate" → "fetch"). */
+let lastTier: "impit-tls" | "impersonate" | "proxy-impersonate" | "fetch" = "impit-tls";
+/** Bytes pulled through the residential proxy on the most recent ladder run. */
+let lastProxyBytes = 0;
 
 /** Transport tier that won the last fetch ladder run (for result evidence). */
-export function lastFetchTier(): "impit-tls" | "impersonate" | "fetch" {
+export function lastFetchTier(): "impit-tls" | "impersonate" | "proxy-impersonate" | "fetch" {
   return lastTier;
+}
+
+/** Bytes transferred through the residential proxy on the last ladder run (bandwidth accounting). */
+export function lastProxyBytesCount(): number {
+  return lastProxyBytes;
+}
+
+/**
+ * Residential proxy URL from env, or null when the tier is disabled.
+ * Accepts a full `DECODO_URL` (`http://user:pass@host:port`) or the split
+ * `DECODO_USER` + `DECODO_PWD` pair (gateway defaults to `gate.decodo.com:7000`).
+ */
+export function residentialProxyUrl(): string | null {
+  const direct = process.env.DECODO_URL?.trim();
+  if (direct) return direct;
+  const user = process.env.DECODO_USER?.trim();
+  const pwd = process.env.DECODO_PWD?.trim();
+  if (user && pwd) {
+    return `http://${encodeURIComponent(user)}:${encodeURIComponent(pwd)}@gate.decodo.com:7000`;
+  }
+  return null;
 }
 
 /** One request, redirects NOT followed (callers validate each hop via followSafely). */
@@ -194,6 +221,24 @@ async function rawGet(
     if (!isRedirect && maxBytes !== undefined) checkDeclaredLength(headers, maxBytes);
     return { status, headers, body: isRedirect ? new ArrayBuffer(0) : await getBuf() };
   };
+  lastProxyBytes = 0;
+  // Tier P1 fast path: domains memoized as IP-blocked (DataDome) skip the
+  // datacenter attempts entirely and go straight to the residential proxy —
+  // saves latency and never burns proxy bytes on a doomed direct hop first.
+  const proxyUrl = residentialProxyUrl();
+  let host = "";
+  try {
+    host = new URL(url).hostname;
+  } catch {
+    /* let the direct hops surface the URL error */
+  }
+  if (proxyUrl && host && (await isDomainProxyNeeded(host).catch(() => false))) {
+    const proxyHop = await rawGetImpersonateProxy(url, reqHeaders, timeoutMs, maxBytes, proxyUrl);
+    if (proxyHop) {
+      lastTier = "proxy-impersonate";
+      return proxyHop;
+    }
+  }
   try {
     if (!sharedImpit) {
       const impitMod = await import("impit");
@@ -216,6 +261,18 @@ async function rawGet(
     if (isAntiBotChallenge(new TextDecoder().decode(hop.body).slice(0, 8000), hop.status)) {
       const impersonateHop = await rawGetImpersonate(url, reqHeaders, timeoutMs, maxBytes);
       if (impersonateHop) {
+        if (isAntiBotChallenge(new TextDecoder().decode(impersonateHop.body).slice(0, 8000), impersonateHop.status)) {
+          // Direct datacenter egress is IP-blocked (DataDome): last cheap try
+          // is the residential proxy hop before browser escalation. Costs
+          // ~100-300KB of proxy bandwidth instead of a 5-15MB page load.
+          if (proxyUrl) {
+            const proxyHop = await rawGetImpersonateProxy(url, reqHeaders, timeoutMs, maxBytes, proxyUrl);
+            if (proxyHop) {
+              lastTier = "proxy-impersonate";
+              return proxyHop;
+            }
+          }
+        }
         lastTier = "impersonate";
         return impersonateHop;
       }
@@ -293,6 +350,74 @@ async function rawGetImpersonate(
   } catch (err) {
     if (err instanceof UnsafeUrlError) throw err;
     return null; // tier unavailable or fetch failed — caller falls back
+  }
+}
+
+/**
+ * Tier P1 — one GET hop with curl-impersonate through the residential proxy
+ * (Decodo or any `http://user:pass@host:port` HTTP proxy). The target sees a
+ * clean residential egress IP while the TLS/HTTP2 fingerprint stays a real
+ * Chrome's. Only reached for domains whose datacenter egress is proven
+ * IP-blocked, so the domain is memoized and later ladder runs skip the
+ * doomed direct attempts entirely. Gzipped HTML only (~100-300KB/request);
+ * a 2MB byte cap keeps a runaway response from draining proxy bandwidth.
+ */
+async function rawGetImpersonateProxy(
+  url: string,
+  reqHeaders: Record<string, string>,
+  timeoutMs: number,
+  maxBytes: number | undefined,
+  proxyUrl: string
+): Promise<RawHop | null> {
+  let host = "";
+  try {
+    host = new URL(url).hostname;
+  } catch {
+    /* URL errors surface via the direct hops */
+  }
+  if (host) await markDomainProxyNeeded(host).catch(() => {});
+  let impersonate: typeof import("@webcrawl/curl-impersonate");
+  try {
+    impersonate = await import("@webcrawl/curl-impersonate");
+  } catch {
+    return null;
+  }
+  // Same identity-header hygiene as the direct impersonate hop: the profile's
+  // UA/sec-ch headers must survive or the UA/TLS mismatch is what DataDome
+  // blocks even from a clean IP.
+  const extra: Record<string, string> = {};
+  for (const [key, value] of Object.entries(reqHeaders)) {
+    const lower = key.toLowerCase();
+    if (
+      lower === "user-agent" ||
+      lower.startsWith("sec-ch-ua") ||
+      lower.startsWith("sec-fetch-") ||
+      lower === "upgrade-insecure-requests" ||
+      lower === "priority"
+    ) {
+      continue;
+    }
+    extra[key] = value;
+  }
+  try {
+    const res = await impersonate.impersonateFetch(url, {
+      headers: extra,
+      timeoutMs,
+      maxBytes: maxBytes ?? 2 * 1024 * 1024,
+      proxy: proxyUrl,
+    });
+    lastProxyBytes += res.bytes;
+    const headers = res.headers;
+    const isRedirect = res.status >= 300 && res.status < 400 && !!headers["location"];
+    if (!isRedirect && maxBytes !== undefined) checkDeclaredLength(headers, maxBytes);
+    return {
+      status: res.status,
+      headers,
+      body: isRedirect ? new ArrayBuffer(0) : (res.body.buffer as ArrayBuffer),
+    };
+  } catch (err) {
+    if (err instanceof UnsafeUrlError) throw err;
+    return null; // proxy tier unavailable or fetch failed — caller escalates
   }
 }
 
