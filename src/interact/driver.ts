@@ -103,7 +103,7 @@ async function createBrowserSandbox(timeoutMs: number): Promise<{ sandbox: Sandb
   return { sandbox, fromSnapshot: false };
 }
 
-async function startSandboxBrowser(opts: { timeoutMs: number; userAgent?: string }): Promise<BrowserHandle> {
+async function startSandboxBrowser(opts: { timeoutMs: number; userAgent?: string; proxy?: string }): Promise<BrowserHandle> {
   const { sandbox, fromSnapshot } = await createBrowserSandbox(opts.timeoutMs);
   try {
     if (!fromSnapshot) {
@@ -115,7 +115,7 @@ async function startSandboxBrowser(opts: { timeoutMs: number; userAgent?: string
     await sandbox.writeFiles([{ path: STEP_SCRIPT_PATH, content: Buffer.from(STEP_SCRIPT) }]);
     const exe = (await sh(sandbox, `cat ${VM_ROOT}/chrome-path`)).stdout.trim().split("\n").pop();
     if (!exe) throw new Error("Browser binary not found in sandbox");
-    await sandbox.runCommand({ cmd: exe, args: chromeArgs({ userAgent: opts.userAgent }), detached: true, sudo: true });
+    await sandbox.runCommand({ cmd: exe, args: chromeArgs({ userAgent: opts.userAgent, proxy: opts.proxy }), detached: true, sudo: true });
     const ready = await sh(sandbox, WAIT_FOR_CDP_SCRIPT, false);
     if (ready.exitCode !== 0) throw new Error("Browser did not start");
     return { kind: "sandbox", sandboxId: sandbox.sandboxId };
@@ -183,11 +183,11 @@ async function resolveLocalPlaywright(): Promise<{ playwright: string; chrome: s
   throw new Error("Local browser unavailable: install playwright or set WC_PLAYWRIGHT");
 }
 
-async function startLocalBrowser(opts: { userAgent?: string }): Promise<BrowserHandle> {
+async function startLocalBrowser(opts: { userAgent?: string; proxy?: string }): Promise<BrowserHandle> {
   const { playwright, chrome } = await resolveLocalPlaywright();
   const port = 9300 + Math.floor(Math.random() * 600);
   const dir = mkdtempSync(path.join(tmpdir(), "wc-interact-"));
-  const args = chromeArgs({ userAgent: opts.userAgent })
+  const args = chromeArgs({ userAgent: opts.userAgent, proxy: opts.proxy })
     .map((a) => (a.startsWith("--remote-debugging-port=") ? `--remote-debugging-port=${port}` : a))
     .map((a) => (a.startsWith("--user-data-dir=") ? `--user-data-dir=${dir}/profile` : a));
   args.unshift("--disable-crash-reporter", "--disable-breakpad");
@@ -275,14 +275,15 @@ async function stopRunner(runner: StepRunner): Promise<void> {
 /* --------------------------------- public --------------------------------- */
 
 export async function startBrowser(
-  opts: { timeoutMs?: number; userAgent?: string; remote?: RemoteProvider | null; domain?: string } = {}
+  opts: { timeoutMs?: number; userAgent?: string; remote?: RemoteProvider | null; domain?: string; proxy?: string } = {}
 ): Promise<BrowserHandle> {
   if (opts.remote) return startRemoteBrowser(opts.remote, opts.timeoutMs ?? 5 * 60_000);
   if (localMode()) return startLocalBrowser(opts);
   if (!interactBrowserAvailable()) throw new Error("browser_unavailable");
   // Warm reconnect first: a sandbox that already solved this domain's bot check
   // keeps its IP / UA / cleared cookies — reusing it skips boot + re-solve.
-  if (opts.domain) {
+  // Never warm-reconnect when proxying: the warm sandbox egresses direct.
+  if (opts.domain && !opts.proxy) {
     const warm = await startWarmSandboxBrowser(opts.domain).catch(() => null);
     if (warm) return warm;
   }
@@ -290,6 +291,7 @@ export async function startBrowser(
     // Long VM timeout headroom so the sandbox can stay warm after this call.
     timeoutMs: Math.max(opts.timeoutMs ?? 5 * 60_000, WARM_SANDBOX_TIMEOUT_MS),
     userAgent: opts.userAgent,
+    proxy: opts.proxy,
   });
 }
 

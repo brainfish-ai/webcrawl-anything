@@ -45,7 +45,7 @@ export const SETUP_SCRIPT = [
   `cat ${VM_ROOT}/chrome-path`,
 ].join(" && ");
 
-export function chromeArgs(opts: { userAgent?: string; width?: number; height?: number } = {}): string[] {
+export function chromeArgs(opts: { userAgent?: string; width?: number; height?: number; proxy?: string } = {}): string[] {
   const args = [
     "--headless=new",
     "--no-sandbox",
@@ -61,6 +61,10 @@ export function chromeArgs(opts: { userAgent?: string; width?: number; height?: 
     `--window-size=${opts.width ?? 1280},${opts.height ?? 800}`,
   ];
   if (opts.userAgent) args.push(`--user-agent=${opts.userAgent}`);
+  // Residential-proxy browser tier (P2): all browser traffic egresses via the
+  // proxy. Chromium cannot parse credentials in --proxy-server, so they are
+  // stripped here and re-supplied per-page via proxy auth in the step script.
+  if (opts.proxy) args.push(`--proxy-server=${opts.proxy.replace(/\/\/[^@/]+@/, "//")}`);
   args.push("about:blank");
   return args;
 }
@@ -183,9 +187,29 @@ try {
         await cdp.send("Page.addScriptToEvaluateOnNewDocument", { source: "Object.defineProperty(Navigator.prototype,'webdriver',{get:()=>false});" });
       } catch {}
       // Remote browsers bill proxy traffic per GB: skip bytes markdown never uses.
-      if (action.lightweight) {
-        const skip = new Set(["image", "media", "font"]);
-        await page.route("**/*", (r) => (skip.has(r.request().resourceType()) ? r.abort() : r.continue())).catch(() => {});
+      // The proxy tier (P2) blocks harder — stylesheets and analytics beacons
+      // too — because residential-proxy bandwidth is billed per MB and markdown
+      // only needs the document, its scripts and the challenge sensor (the
+      // sensor host is never on the ad blocklist). A byte cap aborts the rest
+      // of the page once the billed total blows past the budget.
+      let proxyBilled = 0;
+      if (action.lightweight || action.proxyUser) {
+        const skip = new Set(action.proxyUser ? ["image", "media", "font", "stylesheet"] : ["image", "media", "font"]);
+        const adRe = /(google-analytics|googletagmanager|doubleclick|adservice\.google|facebook\.net|connect\.facebook|hotjar|segment\.io|clarity\.ms|bat\.bing|scorecardresearch|newrelic|optimizely|criteo|taboola|outbrain)/i;
+        const cap = action.proxyUser ? Math.max(2_000_000, Math.min(Number(action.proxyByteCap) || 6_000_000, 12_000_000)) : Infinity;
+        page.on("response", (r) => { try { proxyBilled += Number(r.headers()["content-length"] || 0) || 0; } catch {} });
+        await page.route("**/*", (r) => {
+          try {
+            const req = r.request();
+            if (proxyBilled > cap) return r.abort();
+            if (skip.has(req.resourceType())) return r.abort();
+            if (adRe.test(req.url())) return r.abort();
+            return r.continue();
+          } catch { return r.continue(); }
+        }).catch(() => {});
+        if (action.proxyUser) {
+          try { await page.authenticate({ username: String(action.proxyUser), password: String(action.proxyPass || "") }); } catch {}
+        }
       }
       let navStatus = null;
       page.on("response", (r) => { try { if (r.request().isNavigationRequest() && r.frame() === page.mainFrame()) navStatus = r.status(); } catch {} });

@@ -217,7 +217,18 @@ async function escalateViaStealthBrowser(
   try {
     const { stealthAvailable, stealthFetch } = await import("./engine/stealth.js");
     if (!(await stealthAvailable())) return null;
-    const res = await stealthFetch(url, [], { budgetMs: options.browserBudgetMs ?? 30_000 });
+    // Tier P2: when the domain is memoized as needing a residential egress,
+    // the stealth browser itself egresses through the proxy (resource-blocked,
+    // byte-capped inside stealthFetch) instead of a doomed datacenter IP.
+    let proxy: string | undefined;
+    try {
+      const { residentialProxyUrl } = await import("./engine/fetcher.js");
+      const { isDomainProxyNeeded } = await import("./engine/session.js");
+      let host = "";
+      try { host = new URL(url).hostname; } catch { /* bad url handled below */ }
+      if (host && (await isDomainProxyNeeded(host)) ) proxy = residentialProxyUrl() ?? undefined;
+    } catch { /* proxy memo unavailable — datacenter stealth as before */ }
+    const res = await stealthFetch(url, [], { budgetMs: options.browserBudgetMs ?? 30_000, ...(proxy ? { proxy } : {}) });
     const entry = res.entry;
     if (!entry?.body || entry.blocked || isAntiBotChallenge(entry.body, entry.status ?? 200)) {
       return null;

@@ -92,3 +92,15 @@ test("tier accessors start at the datacenter default with zero proxy bytes", () 
   assert.equal(lastFetchTier(), "impit-tls");
   assert.equal(lastProxyBytesCount(), 0);
 });
+
+test("chromeArgs strips credentials for --proxy-server but keeps the host", async () => {
+  const { chromeArgs } = await import("../interact/vm.js");
+  const args = chromeArgs({ proxy: "http://user:pass@gate.decodo.com:7000" });
+  const flag = args.find((a) => a.startsWith("--proxy-server="));
+  assert.equal(flag, "--proxy-server=http://gate.decodo.com:7000");
+  // credential-free proxy URLs pass through untouched
+  const plain = chromeArgs({ proxy: "http://gate.decodo.com:7000" });
+  assert.ok(plain.includes("--proxy-server=http://gate.decodo.com:7000"));
+  // default launch has no proxy flag
+  assert.equal(chromeArgs().some((a) => a.startsWith("--proxy-server=")), false);
+});

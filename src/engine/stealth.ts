@@ -76,6 +76,8 @@ export async function stealthFetch(
     remote?: boolean;
     /** Keep the solved session warm (sandbox left running + cookies saved) for repeat queries. */
     keepWarm?: boolean;
+    /** Tier P2: egress the stealth browser through this residential proxy URL. */
+    proxy?: string;
   } = {}
 ): Promise<StealthResult> {
   const t0 = Date.now();
@@ -85,9 +87,22 @@ export async function stealthFetch(
   const { startBrowser, runBrowserStep, stopBrowser } = await import("../interact/driver.js");
   const provider = opts.remote === false ? null : remoteStealthProvider();
   const domain = hostOf(entryUrl);
+  const proxyUrl = opts.proxy ?? null;
+  let proxyUser = "";
+  let proxyPass = "";
+  if (proxyUrl) {
+    try {
+      const parsed = new URL(proxyUrl);
+      proxyUser = decodeURIComponent(parsed.username);
+      proxyPass = decodeURIComponent(parsed.password);
+    } catch {
+      /* bad proxy URL: browser launch will surface the error */
+    }
+  }
   // A warm session for this domain means the challenge is already solved: short
-  // solve budget. A cold solve needs the full budget.
-  const hadWarm = provider ? null : await getWarmSession(domain).catch(() => null);
+  // solve budget. A cold solve needs the full budget. Proxy runs never reuse
+  // warm sessions (their cookies were earned from a datacenter egress IP).
+  const hadWarm = provider || proxyUrl ? null : await getWarmSession(domain).catch(() => null);
   const tag = provider ? { provider } : { warm: Boolean(hadWarm) };
   let handle: Awaited<ReturnType<typeof startBrowser>> | null = null;
   // Filled in by `finally` once the provider reports the session cost.
@@ -99,7 +114,8 @@ export async function stealthFetch(
     handle = await startBrowser({
       timeoutMs: Math.min(5 * 60_000, budgetMs + 90_000),
       remote: provider,
-      domain: provider ? undefined : domain,
+      domain: provider || proxyUrl ? undefined : domain,
+      proxy: proxyUrl ?? undefined,
     });
     const res = await runBrowserStep(handle, {
       type: "fetchMany",
@@ -108,6 +124,7 @@ export async function stealthFetch(
       budgetMs,
       solveMs: hadWarm ? Math.min(opts.solveMs ?? 20_000, 8_000) : (opts.solveMs ?? 20_000),
       followSitemaps: opts.followSitemaps ?? 0,
+      ...(proxyUser ? { proxyUser, proxyPass, proxyByteCap: 6_000_000 } : {}),
     });
     if (!res.ok) {
       out.result = { solved: false, entry: null, docs: [], durationMs: 0, error: res.error || "Stealth browser step failed", ...tag };
