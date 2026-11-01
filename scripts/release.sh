@@ -67,7 +67,7 @@ npm run build:packages
 npm run test:packages
 
 if ! git diff --quiet package.json packages/client/package.json packages/mcp/package.json packages/cli/package.json; then
-  git add package.json packages/client/package.json packages/mcp/package.json packages/cli/package.json
+  git add package.json packages/client/package.json packages/mcp/package.json packages/cli/package.json packages/curl-impersonate/package.json
   git commit -m "chore(release): v${NEW_VERSION}"
 fi
 
