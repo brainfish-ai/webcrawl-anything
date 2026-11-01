@@ -26,6 +26,7 @@
     "@modelcontextprotocol/sdk": "^1.32.2",
     "@vercel/sandbox": "^1.0.0",
     "@webcrawl/client": "^1.2.9",
+    "@webcrawl/curl-impersonate": "file:packages/curl-impersonate",
     "@webcrawl/mcp": "^1.2.9",
     "ai": "^7.0.150",
     "impit": "^0.14.7",

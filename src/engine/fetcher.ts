@@ -20,7 +20,7 @@ export interface ScrapeResult {
   links?: string[];
   statusCode: number;
   contentHash: string;
-  tier: "cache" | "static" | "sandbox" | "cloudflare" | "browser";
+  tier: "cache" | "static" | "sandbox" | "cloudflare" | "browser" | "impersonate";
   latencyMs: number;
   error?: string;
 }
@@ -158,6 +158,14 @@ interface RawHop {
   body: ArrayBuffer;
 }
 
+/** Tier that won the most recent rawGet ladder ("impit-tls" → "impersonate" → "fetch"). */
+let lastTier: "impit-tls" | "impersonate" | "fetch" = "impit-tls";
+
+/** Transport tier that won the last fetch ladder run (for result evidence). */
+export function lastFetchTier(): "impit-tls" | "impersonate" | "fetch" {
+  return lastTier;
+}
+
 /** One request, redirects NOT followed (callers validate each hop via followSafely). */
 async function rawGet(
   url: string,
@@ -189,20 +197,95 @@ async function rawGet(
       timeout: timeoutMs,
       redirect: "manual",
     });
-    return await read(res.status, headersToObject(res.headers), () => res.arrayBuffer());
+    const hop = await read(res.status, headersToObject(res.headers), () => res.arrayBuffer());
+    // AWS-WAF-style blocks (403/429/challenge shells) on the impit tier
+    // (Chrome 136) retry once on the curl-impersonate tier (Chrome 150),
+    // which passes WAFs that block the older fingerprint.
+    if (isAntiBotChallenge(new TextDecoder().decode(hop.body).slice(0, 8000), hop.status)) {
+      const impersonateHop = await rawGetImpersonate(url, reqHeaders, timeoutMs, maxBytes);
+      if (impersonateHop) {
+        lastTier = "impersonate";
+        return impersonateHop;
+      }
+    }
+    lastTier = "impit-tls";
+    return hop;
   } catch (err) {
     if (err instanceof ResourceTooLargeError || err instanceof UnsafeUrlError) throw err;
+    // impit unavailable/failed: curl-impersonate tier, then plain fetch.
+    const impersonateHop = await rawGetImpersonate(url, reqHeaders, timeoutMs, maxBytes);
+    if (impersonateHop) {
+      lastTier = "impersonate";
+      return impersonateHop;
+    }
     const res = await fetch(url, {
       headers: reqHeaders,
       redirect: "manual",
       signal: AbortSignal.timeout(timeoutMs),
     });
+    lastTier = "fetch";
     return await read(res.status, headersToObject(res.headers), () => res.arrayBuffer());
   }
 }
 
 /**
- * Fetches a URL using `impit` (BoringSSL Chrome 136 TLS JA3/JA4 + HTTP/2 fingerprint impersonation)
+ * One GET hop with the curl-impersonate tier (Chrome 150 TLS/HTTP2 fingerprint).
+ * Used by `rawGet` when the impit hop is blocked (403/429/challenge) — newer
+ * fingerprints pass AWS WAF domains (stubhub, expedia) that block Chrome 136.
+ * Falls back to plain `fetch` when the binary is unavailable.
+ */
+async function rawGetImpersonate(
+  url: string,
+  reqHeaders: Record<string, string>,
+  timeoutMs: number,
+  maxBytes?: number
+): Promise<RawHop | null> {
+  let impersonate: typeof import("@webcrawl/curl-impersonate");
+  try {
+    impersonate = await import("@webcrawl/curl-impersonate");
+  } catch {
+    return null;
+  }
+  // The chrome150 profile's own identity headers MUST survive (profileHeaders
+  // merges extras last, so a stale UA would override the profile UA and the
+  // UA/TLS mismatch is exactly what DataDome/AWS WAF block). Keep cookies and
+  // referer, drop UA + sec-ch/client-hint identity headers.
+  const extra: Record<string, string> = {};
+  for (const [key, value] of Object.entries(reqHeaders)) {
+    const lower = key.toLowerCase();
+    if (
+      lower === "user-agent" ||
+      lower.startsWith("sec-ch-ua") ||
+      lower.startsWith("sec-fetch-") ||
+      lower === "upgrade-insecure-requests" ||
+      lower === "priority"
+    ) {
+      continue;
+    }
+    extra[key] = value;
+  }
+  try {
+    const res = await impersonate.impersonateFetch(url, {
+      headers: extra,
+      timeoutMs,
+      maxBytes,
+    });
+    const headers = res.headers;
+    const isRedirect = res.status >= 300 && res.status < 400 && !!headers["location"];
+    if (!isRedirect && maxBytes !== undefined) checkDeclaredLength(headers, maxBytes);
+    return {
+      status: res.status,
+      headers,
+      body: isRedirect ? new ArrayBuffer(0) : (res.body.buffer as ArrayBuffer),
+    };
+  } catch (err) {
+    if (err instanceof UnsafeUrlError) throw err;
+    return null; // tier unavailable or fetch failed — caller falls back
+  }
+}
+
+/**
+ * Fetches a URL using `impit` (BoringSSL Chrome 136 TLS JA3/JA4 + HTTP/2 fingerprint impersonation)sonation)
  * so Cloudflare Bot Management and Vercel Security Checkpoint treat requests as real Chrome.
  * Falls back to standard `fetch` if `impit` is unavailable on the current platform.
  * Every redirect hop is checked against the SSRF guard.

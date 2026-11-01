@@ -56,7 +56,7 @@ jobs:
       - name: Run workspace tests
         run: npm run test:packages
 
-      - name: Publish @webcrawl/client, @webcrawl/mcp, and webcrawl to npm
+      - name: Publish @webcrawl/client, @webcrawl/mcp, @webcrawl/curl-impersonate, and webcrawl to npm
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
@@ -107,6 +107,9 @@ jobs:
 
           publish_if_needed "@webcrawl/mcp" "packages/mcp"
           wait_for_registry "@webcrawl/mcp"
+
+          publish_if_needed "@webcrawl/curl-impersonate" "packages/curl-impersonate"
+          wait_for_registry "@webcrawl/curl-impersonate"
 
           publish_if_needed "webcrawl" "packages/cli"
           wait_for_registry "webcrawl"

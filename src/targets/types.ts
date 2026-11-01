@@ -22,6 +22,7 @@ export type TargetTier =
   | "cache"
   | "static"
   | "impit-tls"
+  | "impersonate"
   | "cloudflare"
   | "stealth-browser"
   | "sandbox"

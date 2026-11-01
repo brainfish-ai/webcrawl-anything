@@ -18,7 +18,7 @@ import {
   setCachedPage,
   sha256,
 } from "./engine.js";
-import { fetchResource } from "./engine/fetcher.js";
+import { fetchResource, lastFetchTier } from "./engine/fetcher.js";
 import { parseFile, publicParseMeta } from "./parse/index.js";
 import { isBinaryContentType, looksLikeBinaryUrl } from "./parse/fetch.js";
 import { maxDownloadBytes } from "./parse/limits.js";
@@ -216,7 +216,7 @@ export function createLocalEngineClient(): LocalEngineBackend {
         },
         evidence: {
           ...targetInspection.evidence,
-          tier: "impit-tls",
+          tier: lastFetchTier() === "impersonate" ? "impersonate" : "impit-tls",
           contentHash,
           latencyMs: Date.now() - start,
         },

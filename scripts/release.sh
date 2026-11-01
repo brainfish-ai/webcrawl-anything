@@ -42,6 +42,7 @@ const files = [
   "packages/client/package.json",
   "packages/mcp/package.json",
   "packages/cli/package.json",
+  "packages/curl-impersonate/package.json",
 ];
 
 for (const file of files) {
@@ -51,6 +52,9 @@ for (const file of files) {
     if (!pkg[depField]) continue;
     if (pkg[depField]["@webcrawl/client"]) pkg[depField]["@webcrawl/client"] = `^${next}`;
     if (pkg[depField]["@webcrawl/mcp"]) pkg[depField]["@webcrawl/mcp"] = `^${next}`;
+    if (pkg[depField]["@webcrawl/curl-impersonate"]?.startsWith("^")) {
+      pkg[depField]["@webcrawl/curl-impersonate"] = `^${next}`;
+    }
   }
   fs.writeFileSync(file, JSON.stringify(pkg, null, 2) + "\n");
 }
@@ -93,6 +97,13 @@ if [ "$NO_PUBLISH" = false ]; then
     npm publish --workspace=packages/mcp --access public --userconfig "$TMP_NPMRC" --cache /tmp/npm-cache || true
     for i in $(seq 1 24); do
       if [ "$(npm view "@webcrawl/mcp@${NEW_VERSION}" version --cache /tmp/npm-cache 2>/dev/null || true)" = "$NEW_VERSION" ]; then
+        break
+      fi
+      sleep 3
+    done
+    npm publish --workspace=packages/curl-impersonate --access public --userconfig "$TMP_NPMRC" --cache /tmp/npm-cache || true
+    for i in $(seq 1 24); do
+      if [ "$(npm view "@webcrawl/curl-impersonate@${NEW_VERSION}" version --cache /tmp/npm-cache 2>/dev/null || true)" = "$NEW_VERSION" ]; then
         break
       fi
       sleep 3
