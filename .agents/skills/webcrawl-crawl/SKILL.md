@@ -1,6 +1,6 @@
 ---
 name: webcrawl-crawl
-description: Use when converting any web page, SPA, PDF, Office doc, YouTube video, GitHub repo, or ArXiv paper into clean LLM-ready Markdown, or when a plain fetch/curl/scrape of a URL returns broken, empty, or boilerplate-heavy content. Covers webcrawl (webcrawl-anything, npx webcrawl) tasks like scrape, crawl, map/llms.txt, and extract, plus searching the live web with category: shopping, flights, hotels, real-estate, security/CVE, github, arxiv. Trigger when the user gives a URL and wants its content, wants to crawl multiple pages or a whole docs site, needs structured data from a page, or asks "what does this page say". Skip for single-symbol code questions, local-file reading, or when the content is already in the conversation.
+description: Use when converting any web page, SPA, PDF, Office doc, YouTube video, GitHub repo, or ArXiv paper into clean LLM-ready Markdown, or when a plain fetch/curl/scrape of a URL returns broken, empty, or boilerplate-heavy content. Covers webcrawl (webcrawl-anything, npx webcrawl) tasks like scrape, crawl, map/llms.txt, and extract, plus searching the live web in shopping, flights, hotels, real-estate, security/CVE, github, and arxiv categories. Trigger when the user gives a URL and wants its content, wants to crawl multiple pages or a whole docs site, needs structured data from a page, or asks "what does this page say". Skip for single-symbol code questions, local-file reading, or when the content is already in the conversation.
 license: MIT
 metadata:
   version: "1.3.3"
