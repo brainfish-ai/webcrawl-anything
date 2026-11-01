@@ -50,6 +50,29 @@ npx webcrawl doctor
 
 ---
 
+### Agent Skills (any coding agent)
+
+Install webcrawl's skills into Claude Code, Cursor, Codex, or any agent that supports the [Agent Skills](https://agentskills.io/specification) spec:
+
+```bash
+npx skills add brainfish-ai/webcrawl-anything
+```
+
+| Skill | What it does |
+|---|---|
+| **`webcrawl-ticket-watch`** | Watch StubHub/Ticketmaster/SeatGeek event pages for price drops & seat availability — get a push alert on your phone the moment tickets hit your target. |
+| **`webcrawl-jobs-leads`** | Job-market intelligence: crawl company careers pages and Greenhouse/Lever boards, normalize postings, track new listings daily, rank fit. |
+| **`webcrawl-deal-watch`** | Black Friday / price-drop monitor for your personal watchlist — pings your phone (free ntfy.sh push) when an item hits target price. |
+| **`webcrawl-crawl`** | Any URL → clean Markdown: scrape, crawl, map, extract, categorized search. The core skill. |
+| **`webcrawl-protected-sites`** | Read sites that challenge automated clients (DataDome/Cloudflare/AWS-WAF): TLS-impersonate → proxy → real-browser tier ladder, zero config to start. |
+| **`webcrawl-learn-topic`** | Deep-research any topic: search → crawl authoritative sources → cited digest with a reading list. |
+| **`webcrawl-research-corpus`** | Build RAG-ready Markdown corpora from docs sites: llms.txt, sitemaps, path scoping, hash dedupe. |
+| **`webcrawl-real-estate`** | Search & monitor property listings with the built-in extractor — new-listing and price-reduction alerts. |
+
+See [docs/skills.md](./docs/skills.md) for details and trigger phrases per skill.
+
+---
+
 ### Zero-Key CLI Usage
 
 Webcrawl Anything runs **out-of-the-box locally with zero API keys** using the built-in `impit` TLS-impersonated fetcher, document/media parsers, BM25 + semantic ranker, and vertical extractors:

@@ -1,0 +1,72 @@
+---
+name: webcrawl-deal-watch
+description: Use when monitoring product prices for deals, price drops, or Black Friday / Cyber Monday offers across Amazon, Best Buy, Walmart, Target, or any retailer — building a personal watchlist, re-checking prices on a schedule with webcrawl, and pushing a reminder to the user's mobile phone (ntfy.sh push notification or Telegram) the moment an item hits its target price. Covers all-in price extraction (tax/shipping), stock/availability changes, "leaked Black Friday ad" and early-deal discovery pages, and price-history state files to avoid duplicate alerts. Trigger for "watch this Amazon item and alert my phone when it drops below $X", "track Black Friday deals for my list", "ping me when this goes back in stock", "monitor these products for BF sales", "deal alert to my phone". Skip for automated purchasing/cart sniping/buy bots (this skill watches and alerts only), or marketplace seller-scraping at scale.
+license: MIT
+metadata:
+  version: "1.3.3"
+  author: brainfish-ai
+  repo: brainfish-ai/webcrawl-anything
+---
+
+# Webcrawl — Black Friday deal watch with mobile alerts
+
+Your agent re-checks your personal watchlist on a schedule, extracts the real all-in price, and pings your phone the second an item hits your target. Perfect for Black Friday / Cyber Monday season: run it overnight, wake up to the deals that mattered.
+
+**Watches and alerts only.** It never auto-buys, never adds to cart, never snipes checkout. You always make the purchase decision yourself.
+
+## Quick start
+
+```bash
+# Read a product page right now (works on major retailers)
+npx webcrawl scrape https://www.amazon.com/dp/B0CHX1W1XY
+
+# Structured price extraction
+npx webcrawl extract https://www.amazon.com/dp/B0CHX1W1XY \
+  --prompt "product title, current price, list price, availability, seller"
+
+# Categorized shopping search across retailers
+npx webcrawl search "sony wh-1000xm5" -c shopping
+```
+
+## Workflow
+
+1. **Build the watchlist.** For each item: product URL, target price (what "deal" means to the user), and optionally stock-only tracking. Store as `watchlist.json`:
+   ```json
+   [
+     { "url": "https://www.amazon.com/dp/XXXX", "name": "Sony WH-1000XM5", "target": 248 },
+     { "url": "https://www.bestbuy.com/site/12345", "name": "Mac Mini M4", "target": 499 }
+   ]
+   ```
+2. **Baseline pass.** Scrape each item once; `extract --prompt "product title, current price, list/strikethrough price, availability, seller, shipping"`; store `{price, availability, checkedAt}` in `state.json`.
+3. **Schedule re-checks.** Cron or an agent scheduler: every 30-60 min during Black Friday/Cyber week, 2-4x/day otherwise. Retailer pages are protected — the anti-bot ladder (see webcrawl-protected-sites) handles this, but keep frequencies polite (15+ min minimum between hits on the same domain).
+4. **Evaluate triggers.** Alert when: price ≤ target; price dropped >10% since last check; availability flipped out-of-stock → in-stock. Ignore tiny fluctuations (recompute all-in price).
+5. **Push to mobile — ntfy.sh (free, no signup):**
+   ```bash
+   curl -d "Sony WH-1000XM5 just hit $229 (target $248) — https://www.amazon.com/dp/XXXX" \
+        -H "Title: Deal alert" -H "Tags: money" -H "Priority: high" \
+        ntfy.sh/my-long-random-topic
+   ```
+   One-time setup: user installs the ntfy app (iOS/Android) and subscribes to the same topic. Topic name is the only secret — make it long and random. Telegram bot alternative: `references/alerting.md`.
+6. **Update state and dedupe alerts.** Write new price/timestamp back; suppress repeat alerts while the price stays in the target zone (alert on first hit, then on further 5%+ drops only).
+7. **Black Friday discovery mode.** For "what are the early deals on X": `webcrawl search "<retailer> black friday <category>" -c shopping` and scrape retailer ad/landing pages — many aggressively protect these, where the tier ladder shines.
+
+## All-in price rules
+
+- Extract the price the user actually pays at checkout — including tax and shipping where shown — not the strikethrough "was" price.
+- Amazon: watch the buy-box seller; price can differ by seller/condition. Flag "only X left" and third-party sellers in the alert.
+- Compare against the *list* price only to compute the discount %; alert on absolute target price.
+
+## Validation loop
+
+- Test the phone path first: send one ntfy test push and confirm it lands before relying on the loop.
+- Spot-check one extracted price against the live page (title + price match).
+- Confirm state.json updates each run (no duplicate alerts for the same price).
+- If a product page returns a challenge shell, verify the protected-sites ladder is enabled before treating it as "no price found".
+
+## Compliance
+
+Public product pages only; respect robots.txt and retailer terms; no purchase automation, no cart-hold bots, no checkout sniping; polite poll rates. This skill helps a human buy — it never buys.
+
+## References
+
+- `references/alerting.md` — ntfy.sh topic security, Telegram bot alternative, cron/scheduler patterns, alert-deduping
