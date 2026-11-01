@@ -89,6 +89,30 @@ test("isAntiBotChallenge (shared detector) folds in AWS WAF detection", async ()
   assert.equal(isAntiBotChallenge('{"accepted": true}', 202), false);
 });
 
+test("isAntiBotChallenge detects IP-reputation interstitials (stubhub, expedia) even at status 200", async () => {
+  const { isAntiBotChallenge } = await import("../engine/fetcher.js");
+  // stubhub-style shell served after the TLS gate passes (datacenter IP).
+  // Can arrive cached with status 200, so text markers must catch it alone.
+  const STUBHUB_INTERSTITIAL = `<!DOCTYPE html><html><head><title>stubhub.com</title></head>
+<body><noscript><p>Please enable JavaScript and disable any ad blocker to continue.</p></noscript>
+<div>Please enable JS and disable any ad blocker</div></body></html>`;
+  assert.equal(isAntiBotChallenge(STUBHUB_INTERSTITIAL, 403), true);
+  assert.equal(isAntiBotChallenge(STUBHUB_INTERSTITIAL, 200), true);
+  // expedia-style "Bot or Not?" shell.
+  const EXPEDIA_INTERSTITIAL = `<!DOCTYPE html><html><head><title>Bot or Not?</title></head>
+<body><h1>Show us your human side...</h1><p>We can't tell if you're a human or a bot.</p></body></html>`;
+  assert.equal(isAntiBotChallenge(EXPEDIA_INTERSTITIAL, 429), true);
+  assert.equal(isAntiBotChallenge(EXPEDIA_INTERSTITIAL, 200), true);
+  // Curly-apostrophe variant of the expedia copy.
+  assert.equal(
+    isAntiBotChallenge("<html><body><p>We can’t tell if you’re a human or a bot.</p></body></html>", 200),
+    true
+  );
+  // False-positive guards: real pages mentioning ads/JS/bots in passing.
+  assert.equal(isAntiBotChallenge("<html><body><p>Our site requires JavaScript for maps. Ad blocker detected? Click here.</p></body></html>", 200), false);
+  assert.equal(isAntiBotChallenge("<html><body><p>This bot can't tell if it's human or not — a real article about bots.</p></body></html>", 200), false);
+});
+
 test("sandbox challenge guard treats an AWS WAF interstitial as non-content", async () => {
   const { isChallengeResult } = await import("../sandbox.js");
   // The curl tier's guard mirrors isAntiBotChallenge, so the AWS WAF

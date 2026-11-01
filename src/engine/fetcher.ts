@@ -145,6 +145,18 @@ export function isAntiBotChallenge(html: string, status: number): boolean {
   ) {
     return true;
   }
+  // IP-reputation interstitials (stubhub, expedia) that pass the TLS gate
+  // but gate datacenter IPs behind a "enable JS / are you human" shell.
+  // These can arrive cached or served with status 200, so text markers are
+  // required on top of the 403/429 status check above.
+  if (
+    lower.includes("enable javascript and disable any ad blocker") ||
+    lower.includes("show us your human side") ||
+    lower.includes("we can't tell if you're a human or a bot") ||
+    lower.includes("we can’t tell if you’re a human or a bot")
+  ) {
+    return true;
+  }
   // AWS WAF serves its invisible JS challenge as HTTP 202 with none of the
   // Cloudflare/Vercel markers, so those pages used to pass as real content.
   return isAwsWafChallenge(html, status);
