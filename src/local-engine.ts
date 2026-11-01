@@ -18,7 +18,12 @@ import {
   setCachedPage,
   sha256,
 } from "./engine.js";
-import { fetchResource, lastFetchTier } from "./engine/fetcher.js";
+import {
+  isDomainRenderNeeded,
+  markDomainRenderNeeded,
+} from "./engine/session.js";
+import { isRenderProviderEnabled, renderViaProvider } from "./engine/render.js";
+import { fetchResource, lastFetchTier, needsBrowserEscalation } from "./engine/fetcher.js";
 import { parseFile, publicParseMeta } from "./parse/index.js";
 import { isBinaryContentType, looksLikeBinaryUrl } from "./parse/fetch.js";
 import { maxDownloadBytes } from "./parse/limits.js";
@@ -40,6 +45,15 @@ export interface LocalEngineBackend {
   categories(): Promise<Record<string, unknown>>;
   targets(): Promise<Record<string, unknown>>;
   usage(): Promise<Record<string, unknown>>;
+}
+
+/** Lowercased hostname of a URL (memo key for the Tier R render memo). */
+function safeDomainOf(url: string): string {
+  try {
+    return new URL(url).hostname.toLowerCase();
+  } catch {
+    return "";
+  }
 }
 
 export function createLocalEngineClient(): LocalEngineBackend {
@@ -181,7 +195,50 @@ export function createLocalEngineClient(): LocalEngineBackend {
         }
       }
 
-      // 4. Fetch with TLS impersonation (impit) + target-aware extraction
+      // 4. Fetch with TLS impersonation (impit) + target-aware extraction.
+      //    Tier R: memoized render-needed domains skip the native ladder
+      //    entirely when a render provider is configured — cache (step 3)
+      //    already absorbed repeats, so the provider is the next best hop.
+      const renderDomain = safeDomainOf(targetUrl);
+      if (isRenderProviderEnabled() && (await isDomainRenderNeeded(renderDomain))) {
+        const rendered = await renderViaProvider(targetUrl);
+        if (rendered) {
+          const renderHash = sha256(rendered.markdown);
+          setCachedPage(targetUrl, "none", {
+            title: rendered.title,
+            markdown: rendered.markdown,
+            links: [],
+            statusCode: 200,
+            contentHash: renderHash,
+          });
+          return {
+            success: true,
+            mode: "local",
+            url: targetUrl,
+            title: rendered.title || targetUrl,
+            markdown: rendered.markdown,
+            links: [],
+            data: {
+              url: targetUrl,
+              title: rendered.title || targetUrl,
+              markdown: rendered.markdown,
+              links: [],
+            },
+            evidence: {
+              targetId: "render-provider",
+              tier: "render",
+              contentHash: renderHash,
+              latencyMs: Date.now() - start,
+              sourceUrl: rendered.sourceUrl,
+              matchedSignals: ["render:provider"],
+              limitations: rendered.warnings,
+            },
+          };
+        }
+        // Provider failed on a memo'd domain: fall through to the native
+        // ladder — the memo may be stale or the provider flaky.
+      }
+
       const fetched = await fetchWithTlsImpersonation(targetUrl);
       const { title, markdown, links } = fastHtmlToMarkdown(fetched.html, targetUrl);
       const contentHash = sha256(markdown || fetched.html);
@@ -199,6 +256,85 @@ export function createLocalEngineClient(): LocalEngineBackend {
         html: fetched.html,
         markdown,
       });
+
+      //    Tier R: the native ladder passed the bot check but the page is a
+      //    JS shell / challenge page the ladder cannot render. Memoize the
+      //    domain and either render via the provider (when configured) or
+      //    return the shell with an honest limitation note.
+      if (needsBrowserEscalation(fetched.status, fetched.html, markdown)) {
+        await markDomainRenderNeeded(renderDomain);
+        if (isRenderProviderEnabled()) {
+          const rendered = await renderViaProvider(targetUrl);
+          if (rendered) {
+            const renderHash = sha256(rendered.markdown);
+            setCachedPage(targetUrl, "none", {
+              title: rendered.title,
+              markdown: rendered.markdown,
+              links: [],
+              statusCode: 200,
+              contentHash: renderHash,
+            });
+            return {
+              success: true,
+              mode: "local",
+              url: targetUrl,
+              title: rendered.title || targetUrl,
+              markdown: rendered.markdown,
+              links: [],
+              data: {
+                url: targetUrl,
+                title: rendered.title || targetUrl,
+                markdown: rendered.markdown,
+                links: [],
+              },
+              evidence: {
+                targetId: "render-provider",
+                tier: "render",
+                contentHash: renderHash,
+                latencyMs: Date.now() - start,
+                sourceUrl: rendered.sourceUrl,
+                matchedSignals: ["render:provider"],
+                limitations: rendered.warnings,
+              },
+            };
+          }
+        }
+        const nativeTier =
+          lastFetchTier() === "impersonate"
+            ? "impersonate"
+            : lastFetchTier() === "proxy-impersonate"
+              ? "proxy-impersonate"
+              : "impit-tls";
+        return {
+          success: true,
+          mode: "local",
+          url: targetUrl,
+          title: title || targetInspection.title || targetUrl,
+          markdown: targetInspection.markdown || markdown,
+          links,
+          data: {
+            url: targetUrl,
+            title: title || targetInspection.title || targetUrl,
+            markdown: targetInspection.markdown || markdown,
+            links,
+            structured: targetInspection.structured,
+          },
+          evidence: {
+            ...targetInspection.evidence,
+            tier: nativeTier,
+            contentHash,
+            latencyMs: Date.now() - start,
+            limitations: [
+              ...(Array.isArray(targetInspection.evidence?.limitations)
+                ? (targetInspection.evidence.limitations as string[])
+                : []),
+              "Page needs JS rendering; the local native tiers cannot render it. " +
+                "Run `webcrawl login` and retry with `--mode cloud` (rendering runs in the hosted tier), " +
+                "or self-host a render provider via WEBCRAWL_RENDER_URL.",
+            ],
+          },
+        };
+      }
 
       return {
         success: true,
@@ -346,6 +482,56 @@ export function createLocalEngineClient(): LocalEngineBackend {
     }): Promise<Record<string, unknown>> {
       const targetUrl = /^https?:\/\//i.test(p.url) ? p.url : `https://${p.url}`;
       const fetched = await fetchWithTlsImpersonation(targetUrl);
+      const fastCheck = fastHtmlToMarkdown(fetched.html, targetUrl);
+
+      //    Tier R: shell page the native ladder cannot render — retry
+      //    through scrape() so the render path + cache apply, then extract
+      //    from the rendered Markdown. Without a provider, surface the
+      //    login/cloud limitation instead of silently returning {}.
+      if (needsBrowserEscalation(fetched.status, fetched.html, fastCheck.markdown)) {
+        if (isRenderProviderEnabled()) {
+          const scraped = (await this.scrape({ url: targetUrl, noCache: true })) as {
+            markdown?: string;
+            title?: string;
+            data?: { structured?: Record<string, unknown>; markdown?: string; title?: string };
+          };
+          const renderedMarkdown =
+            (scraped.data && scraped.data.markdown) || scraped.markdown || "";
+          if (renderedMarkdown.trim().length > 40) {
+            const targetInspection = await inspectTarget({
+              url: targetUrl,
+              markdown: renderedMarkdown,
+            });
+            const siteData = await extractWebsiteData(targetUrl);
+            return {
+              success: true,
+              mode: "local",
+              url: targetUrl,
+              data: {
+                ...siteData,
+                ...(targetInspection.structured ? { target: targetInspection.structured } : {}),
+              },
+              evidence: targetInspection.evidence,
+            };
+          }
+        }
+        return {
+          success: true,
+          mode: "local",
+          url: targetUrl,
+          data: {},
+          evidence: {
+            tier: lastFetchTier(),
+            sourceUrl: targetUrl,
+            limitations: [
+              "Page needs JS rendering; the local native tiers cannot render it. " +
+                "Run `webcrawl login` and retry with `--mode cloud` (rendering runs in the hosted tier), " +
+                "or self-host a render provider via WEBCRAWL_RENDER_URL.",
+            ],
+          },
+        };
+      }
+
       const targetInspection = await inspectTarget({
         url: targetUrl,
         html: fetched.html,

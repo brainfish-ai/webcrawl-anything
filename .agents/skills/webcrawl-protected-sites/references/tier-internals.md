@@ -6,6 +6,7 @@
 2. **`impersonate`** — curl-impersonate with a pinned Chrome fingerprint (JA3/JA4 TLS + HTTP/2 SETTINGS/frame ordering + header order). Wins most Cloudflare and AWS WAF interstitials without a proxy.
 3. **`proxy-impersonate`** — same fingerprint, through your residential proxy. Required when the block is **IP-reputation based** (datacenter egress denied). Enabled by env vars; skipped entirely when unset.
 4. **Stealth browser** — real Chrome/Chromium via Playwright/sandbox: full JS challenge solving (DataDome, Cloudflare Turnstile, AWS WAF JS challenges). Warm sessions (solved cookies) are cached per domain and reused by lower tiers — the browser pays the cost once, lightweight tiers ride its cookies afterwards.
+5. **Render provider (`tier: "render"`)** — not part of the anti-bot ladder: it handles pages the ladder *passes* but cannot render (JS SPA shells where listings only appear client-side). Enabled by `WEBCRAWL_RENDER_URL` (+ optional `WEBCRAWL_RENDER_KEY`), unset in zero-key local mode; the hosted cloud tier sets it server-side. Any provider speaking the reader text format (`Title:` / `URL Source:` / `Markdown Content:`) works. The engine detects the shell (`needsBrowserEscalation`), memoizes the domain render-needed (1h TTL), and routes later scrapes provider-first.
 
 ## Proxy configuration (any vendor)
 
@@ -42,4 +43,5 @@ export WEBCRAWL_PROXY_PORT="7000"
 1. Scrape → check `tier` and body quality.
 2. Challenge shell → set proxy env vars → scrape → check `tier: "proxy-impersonate"` and `proxyBytes > 0`.
 3. Still challenged → `npx webcrawl doctor` (Chrome/stealth readiness) → stealth browser tier.
-4. All tiers exhausted → cloud mode (`npx webcrawl login`, `--mode cloud`) or accept the block.
+4. Bot check passes but page is a JS shell (real title, no listings) → render tier: cloud mode (`npx webcrawl login`, `--mode cloud`) or a self-hosted render provider via `WEBCRAWL_RENDER_URL`; zero-key local mode returns the shell with a limitation note.
+5. All tiers exhausted → accept the block.

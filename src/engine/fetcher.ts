@@ -557,5 +557,11 @@ export function needsBrowserEscalation(
   ) {
     return true;
   }
+  // Big-HTML/no-content SPA shell: a very large page (JS bundles / inline
+  // state, e.g. StubHub category pages ~3MB) that yields almost no
+  // extractable text is serving its real content client-side.
+  if (html.length > 250_000 && markdown.length < 500) {
+    return true;
+  }
   return false;
 }
