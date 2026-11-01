@@ -191,16 +191,21 @@ export function lastProxyBytesCount(): number {
 
 /**
  * Residential proxy URL from env, or null when the tier is disabled.
- * Accepts a full `DECODO_URL` (`http://user:pass@host:port`) or the split
- * `DECODO_USER` + `DECODO_PWD` pair (gateway defaults to `gate.decodo.com:7000`).
+ * Generic: a full `WEBCRAWL_PROXY_URL` (`http://user:pass@host:port`) or the
+ * split `WEBCRAWL_PROXY_USER` + `WEBCRAWL_PROXY_PWD` pair, with the gateway
+ * host/port overridable via `WEBCRAWL_PROXY_HOST` / `WEBCRAWL_PROXY_PORT`.
+ * `DECODO_*` equivalents are honored as a legacy fallback so existing
+ * deployments keep working (their default gateway is `gate.decodo.com:7000`).
  */
 export function residentialProxyUrl(): string | null {
-  const direct = process.env.DECODO_URL?.trim();
+  const direct = process.env.WEBCRAWL_PROXY_URL?.trim() || process.env.DECODO_URL?.trim();
   if (direct) return direct;
-  const user = process.env.DECODO_USER?.trim();
-  const pwd = process.env.DECODO_PWD?.trim();
+  const user = process.env.WEBCRAWL_PROXY_USER?.trim() || process.env.DECODO_USER?.trim();
+  const pwd = process.env.WEBCRAWL_PROXY_PWD?.trim() || process.env.DECODO_PWD?.trim();
   if (user && pwd) {
-    return `http://${encodeURIComponent(user)}:${encodeURIComponent(pwd)}@gate.decodo.com:7000`;
+    const host = process.env.WEBCRAWL_PROXY_HOST?.trim() || "gate.decodo.com";
+    const port = process.env.WEBCRAWL_PROXY_PORT?.trim() || "7000";
+    return `http://${encodeURIComponent(user)}:${encodeURIComponent(pwd)}@${host}:${port}`;
   }
   return null;
 }

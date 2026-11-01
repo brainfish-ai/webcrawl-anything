@@ -9,11 +9,28 @@ import {
 } from "../engine/session.js";
 import { residentialProxyUrl, lastFetchTier, lastProxyBytesCount } from "../engine/fetcher.js";
 
-test("residentialProxyUrl resolves DECODO_URL directly", () => {
-  const prev = process.env.DECODO_URL;
-  const prevUser = process.env.DECODO_USER;
-  const prevPwd = process.env.DECODO_PWD;
+test("residentialProxyUrl resolves WEBCRAWL_PROXY_* env vars with DECODO_* legacy fallback", () => {
+  const names = ["WEBCRAWL_PROXY_URL", "WEBCRAWL_PROXY_USER", "WEBCRAWL_PROXY_PWD", "WEBCRAWL_PROXY_HOST", "WEBCRAWL_PROXY_PORT", "DECODO_URL", "DECODO_USER", "DECODO_PWD"];
+  const prev: Record<string, string | undefined> = {};
+  for (const n of names) prev[n] = process.env[n];
+  const clearAll = () => { for (const n of names) delete process.env[n]; };
   try {
+    // generic full URL wins
+    clearAll();
+    process.env.WEBCRAWL_PROXY_URL = "http://u:p@any-gateway.example.com:8080";
+    assert.equal(residentialProxyUrl(), "http://u:p@any-gateway.example.com:8080");
+    // generic split pair with custom host/port
+    delete process.env.WEBCRAWL_PROXY_URL;
+    process.env.WEBCRAWL_PROXY_USER = "user name";
+    process.env.WEBCRAWL_PROXY_PWD = "x";
+    process.env.WEBCRAWL_PROXY_HOST = "residential.example.com";
+    process.env.WEBCRAWL_PROXY_PORT = "1080";
+    assert.equal(
+      residentialProxyUrl(),
+      "http://user%20name:x@residential.example.com:1080"
+    );
+    // DECODO_* legacy fallback, default gateway
+    clearAll();
     process.env.DECODO_URL = "http://u:p@gate.decodo.com:7000";
     process.env.DECODO_USER = "other";
     process.env.DECODO_PWD = "x";
@@ -23,22 +40,20 @@ test("residentialProxyUrl resolves DECODO_URL directly", () => {
       residentialProxyUrl(),
       "http://other:x@gate.decodo.com:7000"
     );
-    // user needs URL-encoding when it carries reserved chars
-    process.env.DECODO_USER = "user name";
-    assert.equal(
-      residentialProxyUrl(),
-      "http://user%20name:x@gate.decodo.com:7000"
-    );
+    // generic vars take precedence over DECODO_*
+    process.env.WEBCRAWL_PROXY_USER = "new";
+    process.env.WEBCRAWL_PROXY_PWD = "pw";
+    assert.equal(residentialProxyUrl(), "http://new:pw@gate.decodo.com:7000");
+    delete process.env.WEBCRAWL_PROXY_USER;
+    delete process.env.WEBCRAWL_PROXY_PWD;
     delete process.env.DECODO_USER;
     delete process.env.DECODO_PWD;
     assert.equal(residentialProxyUrl(), null);
   } finally {
-    if (prev === undefined) delete process.env.DECODO_URL;
-    else process.env.DECODO_URL = prev;
-    if (prevUser === undefined) delete process.env.DECODO_USER;
-    else process.env.DECODO_USER = prevUser;
-    if (prevPwd === undefined) delete process.env.DECODO_PWD;
-    else process.env.DECODO_PWD = prevPwd;
+    for (const n of names) {
+      if (prev[n] === undefined) delete process.env[n];
+      else process.env[n] = prev[n];
+    }
   }
 });
 
