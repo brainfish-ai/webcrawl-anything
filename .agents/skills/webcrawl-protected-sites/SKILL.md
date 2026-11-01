@@ -20,6 +20,7 @@ webcrawl tries tiers in order and remembers (per-domain, 1h TTL) which tier succ
 2. **`impersonate`** — curl-impersonate with a pinned real-Chrome TLS fingerprint (JA3/JA4 + HTTP/2 frame order). Wins most Cloudflare/AWS-WAF checks.
 3. **`proxy-impersonate`** — same fingerprint through a residential proxy. Needed when the block is IP-based (datacenter egress blocked). Requires env config (below).
 4. **Stealth browser** — a real Chrome/Chromium (warm-session, solved cookies reused across tiers) for the hardest DataDome/JS challenges, optionally also through the proxy.
+5. **Render provider (`tier: "render"`)** — for pages the ladder *passes* but cannot render (JS SPA shells that pass the bot check, listings that only appear client-side). When `WEBCRAWL_RENDER_URL` is set (hosted cloud mode sets it server-side; self-hosted any provider), the engine renders through the provider; render-needed domains are memoized like proxy-needed ones. In zero-key local mode it is unset, and the shell comes back with an honest limitation note pointing at `webcrawl login` + `--mode cloud`.
 
 ## Quick start
 

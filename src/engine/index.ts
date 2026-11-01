@@ -6,4 +6,6 @@ export * from "./session.js";
 
 export * from "./fetcher.js";
 
+export * from "./render.js";
+
 export * from "./crawler.js";

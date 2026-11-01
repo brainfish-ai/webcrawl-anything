@@ -47,11 +47,12 @@ npx webcrawl extract "https://www.stubhub.com/chicago-cubs-tickets/" \
 
 ## If prices are missing
 
-- If `extract` returns only the site tagline / a "Please enable JS" shell with no listings, the page renders its listings client-side. **Neither local nor cloud mode renders it today** — verified live: a StubHub category page passes the bot check (`tier: "impersonate"`, real title) but the event list itself only appears after JS renders; an event page returned the shell at `tier: "static"`, HTTP 403, in both zero-key local and logged-in cloud modes. The scrape path does not auto-escalate to a headless browser.
-- Do not treat an empty result as "sold out" — that is a rendering gap, not a page fact. Do not retry blindly; a different tier won't change it.
-- Working path: **Jina Reader renders these pages** (verified live on a StubHub category page: full 91-event list returned). `curl -s "https://r.jina.ai/<url>"` returns the rendered Markdown — use it for JS-rendered event pages. Verify a Jina result is real before trusting it: check the Title/URL Source header and watch for its "may require CAPTCHA" warning on heavily protected pages.
-- For webcrawl-native monitoring, build the watchlist only from event pages that serve real listing HTML — verify each URL with `npx webcrawl scrape <url>` first. If listing text comes back, `extract` will work; if only the tagline comes back, that URL needs Jina or a headless browser.
-- Verify URLs are real before monitoring: a dead URL renders as an empty page too (a "Page Not Found" page looks like a shell in Markdown). Cross-check the page against the live site or a Jina fetch.
+- If `extract` returns only the site tagline / a "Please enable JS" shell with no listings, the page renders its listings client-side. The native ladder cannot render it, but the engine detects the shell (`needsBrowserEscalation`) and escalates automatically.
+- **Tier R (render provider):** when a render provider is configured (`WEBCRAWL_RENDER_URL`, set server-side in hosted cloud mode), scrape/extract render the page through the provider and return real listings — the domain is memoized so later scrapes go provider-first. In zero-key local mode the provider is unset, so the scrape returns the shell with an honest limitation note pointing at `webcrawl login` + `--mode cloud`.
+- Do not treat an empty result as "sold out" — in local zero-key mode that is a rendering gap, not a page fact. Do not retry blindly; the ladder tier won't change it.
+- Verify a render-provider result is real before trusting it: the engine already rejects provider CAPTCHA/error responses, but spot-check the title and listing count against the live page.
+- For webcrawl-native monitoring, build the watchlist only from event pages that serve real listing HTML — verify each URL with `npx webcrawl scrape <url>` first. If listing text comes back, `extract` will work; if only the tagline comes back in zero-key local mode, that URL needs cloud mode (logged-in) or a self-hosted render provider.
+- Verify URLs are real before monitoring: a dead URL renders as an empty page too (a "Page Not Found" page looks like a shell in Markdown). Cross-check the page against the live site or a provider fetch.
 
 ## Validation loop
 
