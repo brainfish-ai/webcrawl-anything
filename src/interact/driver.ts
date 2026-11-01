@@ -9,7 +9,7 @@
  *            (Local World / `next dev`).
  */
 import { execFile, spawn } from "node:child_process";
-import { mkdtempSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { Sandbox } from "@vercel/sandbox";
@@ -163,6 +163,46 @@ async function startWarmSandboxBrowser(domain: string): Promise<BrowserHandle | 
 
 /* ------------------------------ local backend ----------------------------- */
 
+/**
+ * Path to a real, user-installed Chrome when one exists, else null.
+ * Anti-bot vendors (DataDome, Akamai) fingerprint the automation build of
+ * Chromium and serve degraded pages to it, while the same engine driving a
+ * real installed Chrome gets full content — practitioner reports confirm
+ * this on DataDome-protected sites. Priority: explicit env override, then
+ * the standard per-OS install locations.
+ */
+export function installedChromePath(): string | null {
+  if (process.env.INTERACT_CHROME_PATH) return process.env.INTERACT_CHROME_PATH;
+  const candidates: string[] = [];
+  if (process.platform === "darwin") {
+    candidates.push(
+      "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+      `${process.env.HOME || ""}/Applications/Google Chrome.app/Contents/MacOS/Google Chrome`,
+    );
+  } else if (process.platform === "win32") {
+    candidates.push(
+      `${process.env["ProgramFiles"] || "C:\\Program Files"}\\Google\\Chrome\\Application\\chrome.exe`,
+      `${process.env["ProgramFiles(x86)"] || "C:\\Program Files (x86)"}\\Google\\Chrome\\Application\\chrome.exe`,
+    );
+  } else {
+    candidates.push(
+      "/usr/bin/google-chrome",
+      "/usr/bin/google-chrome-stable",
+      "/usr/bin/chromium-browser",
+      "/usr/bin/chromium",
+      "/snap/bin/chromium",
+    );
+  }
+  for (const p of candidates) {
+    try {
+      if (existsSync(p)) return p;
+    } catch {
+      /* not installed here */
+    }
+  }
+  return null;
+}
+
 async function resolveLocalPlaywright(): Promise<{ playwright: string; chrome: string }> {
   const candidates = [
     process.env.WC_PLAYWRIGHT,
@@ -174,7 +214,10 @@ async function resolveLocalPlaywright(): Promise<{ playwright: string; chrome: s
       const mod = (await import(/* webpackIgnore: true */ p)) as {
         chromium: { executablePath(): string };
       };
-      const chrome = process.env.INTERACT_CHROME_PATH || mod.chromium.executablePath();
+      // Prefer a real installed Chrome over playwright's bundled automation
+      // Chromium (see installedChromePath); fall back to the bundle when the
+      // host has no Chrome (CI, containers, minimal servers).
+      const chrome = installedChromePath() || mod.chromium.executablePath();
       return { playwright: p, chrome };
     } catch {
       /* try next */

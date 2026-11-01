@@ -192,6 +192,13 @@ try {
       // only needs the document, its scripts and the challenge sensor (the
       // sensor host is never on the ad blocklist). A byte cap aborts the rest
       // of the page once the billed total blows past the budget.
+      // Anti-bot sensor/challenge hosts are ALWAYS allowed, before any block
+      // rule: blocking them would make the DataDome / Cloudflare / AWS WAF
+      // challenge unsolvable — no cookie is minted, the interstitial loops
+      // forever, and the failed sensor POST is itself a bot signal. The
+      // sensor payload is a few KB of form-encoded text, so allowing it
+      // costs essentially nothing against the byte budget.
+      const allowRe = /(api-js\.datadome\.co|js\.datadome\.co|ct\.captcha-delivery\.com|geo\.captcha-delivery\.com|challenges\.cloudflare\.com|[a-z0-9-]+\.awswaf\.com)/i;
       let proxyBilled = 0;
       if (action.lightweight || action.proxyUser) {
         const skip = new Set(action.proxyUser ? ["image", "media", "font", "stylesheet"] : ["image", "media", "font"]);
@@ -201,6 +208,7 @@ try {
         await page.route("**/*", (r) => {
           try {
             const req = r.request();
+            if (allowRe.test(req.url())) return r.continue(); // never block a challenge sensor, even past the cap
             if (proxyBilled > cap) return r.abort();
             if (skip.has(req.resourceType())) return r.abort();
             if (adRe.test(req.url())) return r.abort();

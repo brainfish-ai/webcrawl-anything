@@ -104,3 +104,51 @@ test("chromeArgs strips credentials for --proxy-server but keeps the host", asyn
   // default launch has no proxy flag
   assert.equal(chromeArgs().some((a) => a.startsWith("--proxy-server=")), false);
 });
+
+test("anti-bot challenge hosts are always allowed past the P2 route blocker", async () => {
+  // The allowlist regex lives inside the vm step script's route handler; it is
+  // defined inline there, so we verify the same pattern contract here: every
+  // challenge/sensor host must match, and normal ads/images must not.
+  const allowRe = /(api-js\.datadome\.co|js\.datadome\.co|ct\.captcha-delivery\.com|geo\.captcha-delivery\.com|challenges\.cloudflare\.com|[a-z0-9-]+\.awswaf\.com)/i;
+  const mustAllow = [
+    "https://api-js.datadome.co/js/",
+    "https://js.datadome.co/tags.js?apikey=25A126AC7E11851BDDB70454B34A05",
+    "https://ct.captcha-delivery.com/captcha.js",
+    "https://geo.captcha-delivery.com/captcha/?initialCtxt=abc",
+    "https://challenges.cloudflare.com/cdn-cgi/challenge-platform/h/b/orchestrate/chl_page/v1",
+    "https://abc123.awswaf.com/js/challenge.js",
+    "https://abc123.def456.awswaf.com/captcha/verify",
+  ];
+  for (const u of mustAllow) assert.ok(allowRe.test(u), `must allow: ${u}`);
+  const mustBlock = [
+    "https://www.googletagmanager.com/gtm.js?id=GTM-1",
+    "https://cdn.example.com/photo.jpg",
+    "https://www.expedia.com/_dms/header/logo.svg",
+    "https://connect.facebook.net/en_US/fbevents.js",
+    "https://static.hotjar.com/c/hotjar.js",
+  ];
+  for (const u of mustBlock) assert.equal(allowRe.test(u), false, `must NOT match allowlist: ${u}`);
+});
+
+test("installedChromePath prefers real Chrome and honors the env override", async () => {
+  const { installedChromePath } = await import("../interact/driver.js");
+  // env override always wins, even for a nonexistent path (caller-set trust)
+  const prev = process.env.INTERACT_CHROME_PATH;
+  try {
+    process.env.INTERACT_CHROME_PATH = "/tmp/definitely-not-chrome";
+    assert.equal(installedChromePath(), "/tmp/definitely-not-chrome");
+    delete process.env.INTERACT_CHROME_PATH;
+    // on this dev machine a real Chrome exists at the standard macOS path
+    if (process.platform === "darwin") {
+      const p = installedChromePath();
+      assert.ok(p === null || p.includes("Google Chrome"), `unexpected: ${p}`);
+    } else {
+      // linux/CI: null when no chrome/chromium is installed, path when it is
+      const p = installedChromePath();
+      assert.ok(p === null || /chrome|chromium/i.test(p), `unexpected: ${p}`);
+    }
+  } finally {
+    if (prev === undefined) delete process.env.INTERACT_CHROME_PATH;
+    else process.env.INTERACT_CHROME_PATH = prev;
+  }
+});
