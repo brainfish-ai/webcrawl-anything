@@ -17,12 +17,12 @@ Event pages (StubHub, Ticketmaster, SeatGeek, venue sites) commonly challenge au
 ## Quick start
 
 ```bash
-# Read an event page now (challenge-protected sites: see "If prices are missing" below)
-npx webcrawl scrape https://www.stubhub.com/chicago-cubs-tickets/venue/8660/
+# Read a team/category page now (bot-check passes; listings are JS-rendered — see "If prices are missing")
+npx webcrawl scrape https://www.stubhub.com/chicago-cubs-tickets/
 
 # Structured extraction of the listings you care about
-npx webcrawl extract "https://www.stubhub.com/chicago-cubs-tickets/venue/8660/" \
-  --prompt "ticket listings with section, quantity, and all-in price"
+npx webcrawl extract "https://www.stubhub.com/chicago-cubs-tickets/" \
+  --prompt "upcoming events with date, opponent, venue, and lowest price"
 ```
 
 ## Workflow
@@ -47,10 +47,11 @@ npx webcrawl extract "https://www.stubhub.com/chicago-cubs-tickets/venue/8660/" 
 
 ## If prices are missing
 
-- If `extract` returns only the site tagline / a "Please enable JS" shell with 0 links and no listings, the page renders its listings client-side. **Neither local nor cloud mode renders it today** — verified live: StubHub venue pages return that shell at `tier: "static"`, HTTP 403, in both zero-key local and logged-in cloud modes; the scrape path does not auto-escalate to a headless browser.
+- If `extract` returns only the site tagline / a "Please enable JS" shell with no listings, the page renders its listings client-side. **Neither local nor cloud mode renders it today** — verified live: a StubHub category page passes the bot check (`tier: "impersonate"`, real title) but the event list itself only appears after JS renders; an event page returned the shell at `tier: "static"`, HTTP 403, in both zero-key local and logged-in cloud modes. The scrape path does not auto-escalate to a headless browser.
 - Do not treat an empty result as "sold out" — that is a rendering gap, not a page fact. Do not retry blindly; a different tier won't change it.
-- Working path: build the watchlist only from event pages that serve real listing HTML. Verify each URL with `npx webcrawl scrape <url>` first — if listing text (event names, sections, prices) comes back, `extract` will work; if only the tagline comes back, that URL cannot be monitored with these commands.
-- JS-only event pages need a headless browser run outside this skill.
+- Working path: **Jina Reader renders these pages** (verified live on a StubHub category page: full 91-event list returned). `curl -s "https://r.jina.ai/<url>"` returns the rendered Markdown — use it for JS-rendered event pages. Verify a Jina result is real before trusting it: check the Title/URL Source header and watch for its "may require CAPTCHA" warning on heavily protected pages.
+- For webcrawl-native monitoring, build the watchlist only from event pages that serve real listing HTML — verify each URL with `npx webcrawl scrape <url>` first. If listing text comes back, `extract` will work; if only the tagline comes back, that URL needs Jina or a headless browser.
+- Verify URLs are real before monitoring: a dead URL renders as an empty page too (a "Page Not Found" page looks like a shell in Markdown). Cross-check the page against the live site or a Jina fetch.
 
 ## Validation loop
 
