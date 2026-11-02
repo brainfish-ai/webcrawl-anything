@@ -157,6 +157,63 @@ function openBrowserUrl(url: string): void {
   }
 }
 
+const esc = (s: string): string =>
+  s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+
+/** Self-contained (no network assets) page served on the loopback callback. */
+export function callbackPage(opts: {
+  kind: "success" | "error" | "info";
+  title: string;
+  body: string;
+  email?: string;
+  credits?: string;
+  tryIt?: string;
+}): string {
+  const tone = opts.kind === "success" ? "#157f3b" : opts.kind === "error" ? "#b42318" : "#6236e8";
+  const icon =
+    opts.kind === "success"
+      ? `<path class="mk" d="M20 33l8 8 16-17"/>`
+      : opts.kind === "error"
+        ? `<path class="mk" d="M23 23l18 18M41 23L23 41"/>`
+        : `<path class="mk" d="M32 22v14M32 42v.5"/>`;
+  const chips = [opts.email ? `<span class="chip">${esc(opts.email)}</span>` : "", opts.credits ? `<span class="chip hot">${esc(opts.credits)}</span>` : ""].join("");
+  const dots = Array.from({ length: 14 }, (_, i) => `<i style="--a:${i * 25.7}deg;--d:${70 + (i % 3) * 18}px;--t:${(i % 5) * 0.06}s"></i>`).join("");
+  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${esc(opts.title)}</title>
+<style>
+:root{--tone:${tone}}*{box-sizing:border-box}
+body{margin:0;min-height:100vh;display:grid;place-items:center;padding:24px;color:#1b1631;font:15px/1.55 -apple-system,BlinkMacSystemFont,"Segoe UI",Inter,sans-serif;background:#fbfaf8}
+main{width:100%;max-width:440px;text-align:center;background:#fff;border:1px solid #e2ddd5;border-radius:16px;padding:36px 32px 28px;box-shadow:0 1px 2px #1b16310d,0 12px 32px #1b16310f;animation:rise .5s cubic-bezier(.2,.8,.2,1) both}
+.brand{display:flex;align-items:center;justify-content:center;gap:8px;font-weight:600;letter-spacing:-.035em;color:#1b1631;margin-bottom:26px}.brand svg{width:26px;height:26px}
+.badge{position:relative;width:96px;height:96px;margin:0 auto 18px}
+.badge svg.ring{width:96px;height:96px;overflow:visible}
+.ring circle{fill:color-mix(in srgb,var(--tone) 12%,transparent);stroke:var(--tone);stroke-width:2.5;stroke-dasharray:190;stroke-dashoffset:190;animation:draw .7s .1s ease-out forwards}
+.mk{fill:none;stroke:var(--tone);stroke-width:4.5;stroke-linecap:round;stroke-linejoin:round;stroke-dasharray:60;stroke-dashoffset:60;animation:draw .45s .6s ease-out forwards}
+.burst{position:absolute;inset:0;pointer-events:none}.burst i{position:absolute;left:50%;top:50%;width:6px;height:6px;margin:-3px;border-radius:50%;background:var(--tone);opacity:0;transform:rotate(var(--a)) translateY(0);animation:pop .9s calc(.7s + var(--t)) ease-out forwards}
+h1{font-size:22px;margin:0 0 6px;letter-spacing:-.02em}p{margin:0 0 18px;color:#4a4460}
+.chips{display:flex;gap:8px;justify-content:center;flex-wrap:wrap;margin-bottom:20px}
+.chip{font-size:12.5px;padding:4px 10px;border-radius:999px;background:#f6f4f0;border:1px solid #e2ddd5;color:#4a4460}.chip.hot{background:#f1ecff;border-color:#d9ccff;color:#4f24cf}
+.try{text-align:left;background:#f6f4f0;border:1px solid #efebe5;border-radius:10px;padding:12px 14px;margin-bottom:18px}
+.trow{display:flex;align-items:center;justify-content:space-between;margin-bottom:4px}.trow small{margin:0!important}
+.copy{font:600 12px/1 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;padding:6px 10px;border-radius:7px;border:1px solid #e2ddd5;background:#fff;color:#4a4460;cursor:pointer}.copy:hover{border-color:#6236e8;color:#4f24cf}
+.try code{user-select:all;-webkit-user-select:all;cursor:text}
+.try small{display:block;color:#5e5873;margin-bottom:4px;font-size:12px;text-transform:uppercase;letter-spacing:.08em}
+.try code{font:13px/1.4 ui-monospace,SFMono-Regular,Menlo,monospace;color:#4f24cf;word-break:break-all}.try code:before{content:"$ ";color:#7d7690}
+.foot{font-size:13px;color:#5e5873;margin:0}
+@keyframes rise{from{opacity:0;transform:translateY(14px) scale(.98)}}
+@keyframes draw{to{stroke-dashoffset:0}}
+@keyframes pop{0%{opacity:1}100%{opacity:0;transform:rotate(var(--a)) translateY(calc(var(--d) * -1)) scale(.3)}}
+@media (prefers-reduced-motion:reduce){*{animation-duration:.01s!important;animation-delay:0s!important}}
+</style></head><body><main>
+<div class="brand"><svg viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="7" fill="#1b1631"/><g stroke-linejoin="round" stroke-linecap="round" fill="none" stroke-width="3"><path d="M5 21.5L16 27.5L27 21.5" stroke="#8a80b8"/><path d="M5 16L16 22L27 16" stroke="#c9b8ff"/></g><path d="M16 4.5L27 10.5L16 16.5L5 10.5Z" fill="#8b6cff" stroke="#8b6cff" stroke-width="2" stroke-linejoin="round"/></svg>Webcrawl</div>
+<div class="badge"><svg class="ring" viewBox="0 0 64 64" aria-hidden="true"><circle cx="32" cy="32" r="30"/>${icon}</svg>${opts.kind === "success" ? `<div class="burst">${dots}</div>` : ""}</div>
+<h1>${esc(opts.title)}</h1><p>${opts.body}</p>
+${chips ? `<div class="chips">${chips}</div>` : ""}
+${opts.tryIt ? `<div class="try"><div class="trow"><small>Try it now</small><button type="button" class="copy" id="cp">Copy</button></div><code id="cmd">${esc(opts.tryIt)}</code></div>
+<script>(function(){var b=document.getElementById("cp"),c=document.getElementById("cmd");if(!b||!c)return;var t=c.textContent;function done(){b.textContent="Copied";setTimeout(function(){b.textContent="Copy"},1500)}function fb(){var r=document.createRange();r.selectNodeContents(c);var s=getSelection();s.removeAllRanges();s.addRange(r);try{document.execCommand("copy");done()}catch(e){}}b.onclick=function(){if(navigator.clipboard&&navigator.clipboard.writeText){navigator.clipboard.writeText(t).then(done,fb)}else{fb()}}})()</script>` : ""}
+<p class="foot">You can close this tab and return to your terminal.</p>
+</main></body></html>`;
+}
+
 async function runWebOAuthLogin(
   baseUrl: string,
   fetchImpl: typeof fetch,
@@ -224,14 +281,14 @@ async function runWebOAuthLogin(
             if (handled) {
               // Browser retry / prefetch of the same callback: the code is single-use, so never exchange it twice.
               res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
-              res.end("<h3>Already received. You can close this tab and return to your terminal.</h3>");
+              res.end(callbackPage({ kind: "info", title: "Already received", body: "This sign-in link was already used. Your terminal has everything it needs." }));
               return;
             }
             const oauthError = u.searchParams.get("error");
             if (oauthError && returnedState === state) {
               handled = true;
               res.writeHead(400, { "content-type": "text/html; charset=utf-8" });
-              res.end("<h3>Authorization was cancelled. You can close this tab.</h3>");
+              res.end(callbackPage({ kind: "error", title: "Sign-in cancelled", body: "You chose not to connect the CLI. Run <b>webcrawl login</b> whenever you want to try again." }));
               clearTimeout(timeout);
               server.close();
               reject(new Error(`OAuth authorization failed: ${oauthError}.`));
@@ -240,7 +297,7 @@ async function runWebOAuthLogin(
             if (!code || returnedState !== state) {
               // Stray or forged request: reject it but keep waiting for the real callback.
               res.writeHead(400, { "content-type": "text/html; charset=utf-8" });
-              res.end("<h3>Authorization failed or state mismatch.</h3>");
+              res.end(callbackPage({ kind: "error", title: "Link not recognised", body: "This sign-in link does not match the one your terminal is waiting for. Run <b>webcrawl login</b> again for a fresh link." }));
               return;
             }
             handled = true;
@@ -260,7 +317,7 @@ async function runWebOAuthLogin(
               const detail = (await tokenRes.json().catch(() => ({}))) as { error?: string; error_description?: string };
               const reason = detail.error_description || detail.error;
               res.writeHead(400, { "content-type": "text/html; charset=utf-8" });
-              res.end("<h3>Webcrawl sign-in failed. Return to your terminal for details.</h3>");
+              res.end(callbackPage({ kind: "error", title: "Sign-in failed", body: "Webcrawl could not finish signing you in. Your terminal has the details. Run <b>webcrawl login</b> to try again." }));
               throw new Error(
                 `OAuth token exchange failed (HTTP ${tokenRes.status}${reason ? `: ${reason}` : ""}). Run \`webcrawl login\` again, or use \`webcrawl login --email <you@domain.com>\`.`
               );
@@ -288,8 +345,19 @@ async function runWebOAuthLogin(
             }
             const meRes = await authedClient.me().catch(() => undefined);
             res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
+            const u2 = meRes?.user;
             res.end(
-              "<html><body style='font-family:system-ui;padding:2rem'><h2>✓ Webcrawl CLI authenticated!</h2><p>Your account and 1,000 monthly credits are now linked. You can close this tab and return to your terminal or agent.</p></body></html>"
+              callbackPage({
+                kind: "success",
+                title: "You're connected",
+                body: "Webcrawl CLI is signed in. Search, read and crawl the web from your terminal or your agent.",
+                email: u2?.email,
+                credits:
+                  u2?.creditsRemaining !== undefined && u2?.creditsLimit !== undefined
+                    ? `${u2.creditsRemaining.toLocaleString("en-US")} / ${u2.creditsLimit.toLocaleString("en-US")} credits`
+                    : undefined,
+                tryIt: 'webcrawl search "best ramen in shibuya"',
+              })
             );
             clearTimeout(timeout);
             server.close();
