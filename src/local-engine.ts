@@ -56,6 +56,26 @@ function safeDomainOf(url: string): string {
   }
 }
 
+/**
+ * Apply `map --filter` / `search` after discovery, then honour `-n` / `limit`.
+ * Matching is a case-insensitive substring of the URL. Exported for unit tests.
+ */
+export function filterMappedLinks(
+  links: string[],
+  search?: string,
+  limit = 100
+): string[] {
+  const cap = Math.max(1, limit);
+  const needle = search?.trim().toLowerCase();
+  const filtered = needle
+    ? links.filter((l) => l.toLowerCase().includes(needle))
+    : links;
+  return filtered.slice(0, cap);
+}
+
+/** How many URLs to discover before applying `--filter`, so a small `-n` cannot hide matches. */
+const MAP_FILTER_DISCOVER_LIMIT = 5000;
+
 export function createLocalEngineClient(): LocalEngineBackend {
   return {
     baseUrl: "local://engine",
@@ -427,13 +447,15 @@ export function createLocalEngineClient(): LocalEngineBackend {
 
     async map(p: { url: string; limit?: number; search?: string }): Promise<Record<string, unknown>> {
       const targetUrl = /^https?:\/\//i.test(p.url) ? p.url : `https://${p.url}`;
+      const limit = Math.max(1, p.limit ?? 100);
+      const needle = p.search?.trim();
+      // Discover first (widely when filtering), then apply search and limit so
+      // `map --filter webhooks -n 10` can still find /webhooks/* URLs that are
+      // not among the first 10 sitemap entries (#11).
       const mapped = await mapWebsiteUrls(targetUrl, {
-        limit: p.limit ?? 100,
+        limit: needle ? Math.max(limit, MAP_FILTER_DISCOVER_LIMIT) : limit,
       });
-      const needle = p.search?.trim().toLowerCase();
-      const links = needle
-        ? mapped.links.filter((l) => l.toLowerCase().includes(needle))
-        : mapped.links;
+      const links = filterMappedLinks(mapped.links, needle, limit);
       return {
         success: true,
         mode: "local",
