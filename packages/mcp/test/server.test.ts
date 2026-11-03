@@ -37,8 +37,8 @@ describe("webcrawl MCP server", () => {
       "web_monitor",
       "web_parse",
       "web_parse_status",
+      "web_read",
       "web_rerank",
-      "web_scrape",
       "web_search",
     ]);
     assert.match(client.getInstructions() ?? "", /web_search/);
@@ -71,15 +71,15 @@ describe("webcrawl MCP server", () => {
     assert.deepEqual(calls[0].body?.filters, { sites: ["booking.com"] });
   });
 
-  it("web_scrape returns markdown with title", async () => {
+  it("web_read returns markdown with title", async () => {
     const { client } = await connect(() => ({ json: { data: { title: "Hi", markdown: "# body" } } }));
-    const r = await client.callTool({ name: "web_scrape", arguments: { url: "https://a.com" } });
+    const r = await client.callTool({ name: "web_read", arguments: { url: "https://a.com" } });
     assert.match(text(r), /^# Hi\n\n# body/);
   });
 
   it("caps oversized output", async () => {
     const { client } = await connect(() => ({ json: { markdown: "x".repeat(MAX_OUTPUT_CHARS * 2) } }));
-    const r = await client.callTool({ name: "web_scrape", arguments: { url: "https://a.com" } });
+    const r = await client.callTool({ name: "web_read", arguments: { url: "https://a.com" } });
     assert.ok(text(r).length < MAX_OUTPUT_CHARS + 100);
     assert.match(text(r), /\[truncated \d+ characters\]/);
   });

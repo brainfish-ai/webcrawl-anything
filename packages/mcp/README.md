@@ -46,7 +46,7 @@ Set `WEBCRAWL_MCP_SCHEMA_PROFILE=compact` (default when installed via `npx webcr
 ## Tools Provided
 
 - `web_search` — Search the web or structured verticals (`shopping`, `flights`, `hotels`, `real-estate`, `business`, `security`, `academic`, `tech`, `news`).
-- `web_scrape` — Fetch a URL and return clean Markdown with target evidence.
+- `web_read` — Fetch a URL and return clean Markdown with target evidence.
 - `web_parse` / `web_parse_status` — Parse PDFs (native + OCR), Word/Excel/PowerPoint files, YouTube videos, and audio/video into Markdown.
 - `web_map` — Discover all URLs on a domain (`sitemap.xml`, `robots.txt`, and link graph).
 - `web_crawl` — Crawl up to 25 pages starting from a URL.

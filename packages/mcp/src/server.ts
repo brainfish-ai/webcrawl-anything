@@ -34,7 +34,7 @@ export type WebcrawlLikeClient = Pick<
 
 const INSTRUCTIONS = `Webcrawl Anything gives you live web & target inspection access (zero-key local engine or webcrawl.app cloud).
 - web_search: find pages or structured results. Set category for flights, hotels, real-estate, shopping, news, local business, security (CVEs), academic or tech. Results are localised to the user.
-- web_scrape: read one URL as clean markdown with target evidence (websites, SPAs, GitHub, ArXiv, llms.txt).
+- web_read: read one URL as clean markdown with target evidence (websites, SPAs, GitHub, ArXiv, llms.txt).
 - web_parse: read a PDF, Office file, YouTube video, image, or audio/video at a URL as markdown (OCR and transcripts included). For long files set background and poll web_parse_status.
 - web_map: list the URLs on a site before deciding what to scrape.
 - web_crawl: read several pages of one site (max 25).
@@ -125,12 +125,12 @@ export function createWebcrawlMcpServer(
   );
 
   server.registerTool(
-    "web_scrape",
+    "web_read",
     {
-      title: "Scrape a page",
+      title: "Read a page",
       description: compact
         ? "Fetch one URL as clean markdown."
-        : "Fetch one URL and return its main content as markdown. Handles JavaScript-heavy and bot-protected pages.",
+        : "Fetch one URL and return its main content as markdown.",
       inputSchema: {
         url: z.string().url(),
         no_cache: desc(z.boolean().optional(), "Skip cached copy"),

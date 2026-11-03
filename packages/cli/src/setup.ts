@@ -72,7 +72,7 @@ Use **Webcrawl Anything** (\`webcrawl\` CLI or \`webcrawl\` MCP tools) whenever 
      - \`security\`: CVE / GHSA records with CVSS scores, CWEs, affected/fixed versions, and CISA KEV status.
      - \`academic\`: ArXiv and research papers.
      - \`tech\` / \`news\` / \`general\`: General and developer search.
-2. **Page & Developer Target Inspection (\`web_scrape\` / \`webcrawl scrape <url>\`)**:
+2. **Page & Developer Target Inspection (\`web_read\` / \`webcrawl scrape <url>\`)**:
    - Works on any website, client-rendered SPA, GitHub repository/issue/release, ArXiv abstract page, or \`llms.txt\` manifest.
 3. **Binary Documents & Media (\`web_parse\` / \`webcrawl scrape <pdf-or-youtube-url>\`)**:
    - Reads PDFs (native text + automatic OCR on scanned pages), Word (\`.docx\`), Excel (\`.xlsx\`), PowerPoint (\`.pptx\`), and YouTube URLs (timestamped transcripts).

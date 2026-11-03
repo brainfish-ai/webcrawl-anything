@@ -45,7 +45,7 @@
             {
               "description": "Read a public page as Markdown",
               "prompt": "Read https://en.wikipedia.org/wiki/Web_crawler and give me the three main uses of crawlers, citing the page.",
-              "tools_triggered": "web_scrape",
+              "tools_triggered": "web_read",
               "expected_behavior": "Returns a short summary grounded in the page content, with the source URL."
             },
             {
