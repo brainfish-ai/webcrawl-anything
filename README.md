@@ -12,6 +12,7 @@
   <a href="https://www.npmjs.com/package/webcrawl"><img src="https://img.shields.io/npm/v/webcrawl?color=0a0a0a" alt="npm version"></a>
   <a href="https://www.npmjs.com/package/@webcrawl/mcp"><img src="https://img.shields.io/npm/v/@webcrawl/mcp?label=%40webcrawl%2Fmcp&color=2563eb" alt="MCP Server"></a>
   <a href="https://www.npmjs.com/package/webcrawl"><img src="https://img.shields.io/npm/dm/webcrawl?color=10b981" alt="npm downloads"></a>
+  <a href="https://skills.sh/brainfish-ai/webcrawl-anything"><img src="https://skills.sh/b/brainfish-ai/webcrawl-anything" alt="skills.sh installs"></a>
   <a href="https://github.com/brainfish-ai/webcrawl-anything/stargazers"><img src="https://img.shields.io/github/stars/brainfish-ai/webcrawl-anything?style=flat&color=f59e0b" alt="GitHub stars"></a>
   <a href="./LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="License: MIT"></a>
 </p>
@@ -25,10 +26,22 @@
 ## Set up in one line
 
 ```bash
+npx skills add brainfish-ai/webcrawl-anything
+```
+
+That installs all eight Webcrawl [Agent Skills](#agent-skills-any-coding-agent) into Claude Code, Cursor, Codex, Gemini, Windsurf or any agent that reads `SKILL.md`. Only want one? Pick it by name:
+
+```bash
+npx skills add brainfish-ai/webcrawl-anything --skill webcrawl-deal-watch
+```
+
+To also register the `@webcrawl/mcp` server, so your agent can call the crawl, search and monitor tools directly:
+
+```bash
 npx webcrawl setup
 ```
 
-That registers the `@webcrawl/mcp` server and the Webcrawl Agent Skill in Claude Code, Cursor, Codex, Gemini and Windsurf. Restart your agent and paste one of these:
+Restart your agent and paste one of these:
 
 ```text
 Is CVE-2024-3094 in anything I depend on? Look it up, give me the CVSS score, CISA KEV
@@ -98,6 +111,12 @@ Install webcrawl's skills into Claude Code, Cursor, Codex, or any agent that sup
 
 ```bash
 npx skills add brainfish-ai/webcrawl-anything
+```
+
+Or install a single skill, for example the Black Friday price-drop watcher:
+
+```bash
+npx skills add brainfish-ai/webcrawl-anything --skill webcrawl-deal-watch
 ```
 
 | Skill | What it does |
