@@ -24,8 +24,8 @@ import {
 } from "./engine/session.js";
 import { isRenderProviderEnabled, renderViaProvider } from "./engine/render.js";
 import { fetchResource, lastFetchTier, needsBrowserEscalation } from "./engine/fetcher.js";
-import { parseFile, publicParseMeta } from "./parse/index.js";
-import { isBinaryContentType, looksLikeBinaryUrl } from "./parse/fetch.js";
+import { detectFileKind } from "./parse/detect.js";
+import { isBinaryKind, parseFile, publicParseMeta } from "./parse/index.js";
 import { maxDownloadBytes } from "./parse/limits.js";
 import { parseYouTubeCached, youtubeVideoId } from "./parse/youtube.js";
 import { rankDocuments, type RawCandidateDocument } from "./ranker.js";
@@ -129,40 +129,7 @@ export function createLocalEngineClient(): LocalEngineBackend {
         };
       }
 
-      // 2. Check if binary document URL (PDF, DOCX, XLSX, PPTX)
-      if (looksLikeBinaryUrl(targetUrl)) {
-        const fetched = await fetchResource(targetUrl, { maxBytes: maxDownloadBytes() });
-        if (isBinaryContentType(fetched.contentType) || looksLikeBinaryUrl(fetched.url)) {
-          const parsed = await parseFile(
-            { bytes: fetched.body, contentType: fetched.contentType, fileName: fetched.url },
-            { bypassCache: p.noCache }
-          );
-          return {
-            success: true,
-            mode: "local",
-            url: fetched.url,
-            title: parsed.title,
-            markdown: parsed.markdown,
-            data: {
-              url: fetched.url,
-              title: parsed.title,
-              markdown: parsed.markdown,
-              metadata: { parse: publicParseMeta(parsed) },
-            },
-            evidence: {
-              targetId: "pdf-office",
-              tier: parsed.meta.method === "ocr" ? "ocr" : "native-parser",
-              contentHash: parsed.contentHash,
-              latencyMs: Date.now() - start,
-              sourceUrl: fetched.url,
-              matchedSignals: [`parse:${parsed.meta.kind}:${parsed.meta.method}`],
-              limitations: parsed.meta.warnings,
-            },
-          };
-        }
-      }
-
-      // 3. Check local cache first
+      // 2. Check local cache first
       if (!p.noCache) {
         const cached = await getCachedPageAsync(targetUrl, "none");
         if (cached) {
@@ -195,9 +162,54 @@ export function createLocalEngineClient(): LocalEngineBackend {
         }
       }
 
-      // 4. Fetch with TLS impersonation (impit) + target-aware extraction.
+      // 3. Binary-safe fetch, then route by Content-Type / magic bytes (not URL extension).
+      //    Extensionless PDFs such as https://arxiv.org/pdf/1706.03762 used to dump raw bytes.
+      const resource = await fetchResource(targetUrl, { maxBytes: maxDownloadBytes() });
+      {
+        const { kind } = detectFileKind({
+          bytes: resource.body,
+          contentType: resource.contentType,
+          fileName: resource.url,
+        });
+        if (isBinaryKind(kind) && resource.status < 400) {
+          const parsed = await parseFile(
+            { bytes: resource.body, contentType: resource.contentType, fileName: resource.url },
+            { bypassCache: p.noCache }
+          );
+          return {
+            success: true,
+            mode: "local",
+            url: resource.url,
+            title: parsed.title,
+            markdown: parsed.markdown,
+            data: {
+              url: resource.url,
+              title: parsed.title,
+              markdown: parsed.markdown,
+              metadata: { parse: publicParseMeta(parsed) },
+            },
+            evidence: {
+              targetId: kind === "audio" || kind === "video" || kind === "image" ? "youtube-media" : "pdf-office",
+              tier: parsed.meta.method === "ocr" ? "ocr" : "native-parser",
+              contentHash: parsed.contentHash,
+              latencyMs: Date.now() - start,
+              sourceUrl: resource.url,
+              matchedSignals: [`parse:${parsed.meta.kind}:${parsed.meta.method}`],
+              limitations: parsed.meta.warnings,
+            },
+          };
+        }
+      }
+
+      const prefetched = {
+        status: resource.status,
+        html: new TextDecoder().decode(resource.body),
+        headers: resource.headers,
+      };
+
+      // 4. HTML path from the already-fetched body + target-aware extraction.
       //    Tier R: memoized render-needed domains skip the native ladder
-      //    entirely when a render provider is configured — cache (step 3)
+      //    entirely when a render provider is configured — cache (step 2)
       //    already absorbed repeats, so the provider is the next best hop.
       const renderDomain = safeDomainOf(targetUrl);
       if (isRenderProviderEnabled() && (await isDomainRenderNeeded(renderDomain))) {
@@ -239,7 +251,7 @@ export function createLocalEngineClient(): LocalEngineBackend {
         // ladder — the memo may be stale or the provider flaky.
       }
 
-      const fetched = await fetchWithTlsImpersonation(targetUrl);
+      const fetched = prefetched;
       const { title, markdown, links } = fastHtmlToMarkdown(fetched.html, targetUrl);
       const contentHash = sha256(markdown || fetched.html);
 
