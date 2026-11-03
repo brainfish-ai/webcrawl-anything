@@ -10,7 +10,7 @@ The local, no-key MCP server (`npx @webcrawl/mcp`) is not part of this package. 
 npm run package:chatgpt
 ```
 
-This validates `plugin.json`, `mcp.json`, the onboarding skill and every referenced asset, then writes `dist/webcrawl-anything-chatgpt.zip`.
+This validates `plugin.json`, `mcp.json`, the onboarding skill and every referenced asset, then writes `dist/webcrawl-chatgpt.zip`.
 
 ## What lives where
 

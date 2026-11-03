@@ -1,9 +1,9 @@
 ---
 name: get-started
-description: Use Webcrawl Anything to search the web, read pages and documents with sources, map or crawl a site, extract fields, and set up page monitors.
+description: Use Webcrawl to search the web, read pages and documents with sources, map or crawl a site, extract fields, and set up page monitors.
 ---
 
-# Getting started with Webcrawl Anything
+# Getting started with Webcrawl
 
 Use these tools when the user needs live information from public web pages or documents.
 

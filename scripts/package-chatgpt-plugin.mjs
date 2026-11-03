@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Validate plugins/chatgpt and write dist/webcrawl-anything-chatgpt.zip for the
+// Validate plugins/chatgpt and write dist/webcrawl-chatgpt.zip for the
 // OpenAI plugin directory (ChatGPT + Codex). No dependencies: uses the system `zip`.
 import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync } from "node:fs";
@@ -8,7 +8,7 @@ import { fileURLToPath } from "node:url";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const dir = join(root, "plugins/chatgpt");
-const out = join(root, "dist/webcrawl-anything-chatgpt.zip");
+const out = join(root, "dist/webcrawl-chatgpt.zip");
 const errors = [];
 const fail = (msg) => errors.push(msg);
 

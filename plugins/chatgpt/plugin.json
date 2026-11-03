@@ -1,6 +1,6 @@
 {
   "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
-  "name": "webcrawl-anything",
+  "name": "webcrawl",
   "version": "1.0.2",
   "description": "Search the web, read pages and documents as Markdown with source links, map and crawl sites, and watch pages for changes.",
   "author": {
@@ -15,9 +15,9 @@
   "extensions": {
     "com.openai": {
       "interface": {
-        "displayName": "Webcrawl Anything",
+        "displayName": "Webcrawl",
         "shortDescription": "Search, read and watch the web",
-        "longDescription": "Webcrawl Anything searches the web and structured sources (news, shopping, travel, local business, academic papers and CVEs), reads any public page, PDF, Office file or YouTube video as clean Markdown, maps and crawls a site, extracts structured fields, and watches pages on a schedule with email or webhook alerts. Every result includes its source URL so answers can be checked. Monitors belong to your connected webcrawl.app account.",
+        "longDescription": "Webcrawl searches the web and structured sources (news, shopping, travel, local business, academic papers and CVEs), reads any public page, PDF, Office file or YouTube video as clean Markdown, maps and crawls a site, extracts structured fields, and watches pages on a schedule with email or webhook alerts. Every result includes its source URL so answers can be checked. Monitors belong to your connected webcrawl.app account.",
         "developerName": "Brainfish",
         "category": "Developer Tools",
         "capabilities": ["Search the web", "Read pages and documents", "Map and crawl sites", "Extract structured data", "Monitor pages for changes"],
