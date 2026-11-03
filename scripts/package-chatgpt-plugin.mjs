@@ -56,8 +56,11 @@ if (banned) fail(`listing copy uses disallowed wording: ${[...new Set(banned.map
 
 // Review cases.
 const tc = oa.review?.test_cases ?? {};
-if ((tc.positive ?? []).length < 3) fail("review.test_cases.positive: add at least 3 cases");
-if ((tc.negative ?? []).length < 1) fail("review.test_cases.negative: add at least 1 case");
+// Initial MCP review requires exactly five positive and three negative cases.
+if ((tc.positive ?? []).length !== 5) fail(`review.test_cases.positive: needs exactly 5 cases (has ${(tc.positive ?? []).length})`);
+if ((tc.negative ?? []).length !== 3) fail(`review.test_cases.negative: needs exactly 3 cases (has ${(tc.negative ?? []).length})`);
+if (oa.review?.demo_recording_url && !String(oa.review.demo_recording_url).startsWith("https://")) fail("review.demo_recording_url must be https");
+if (!oa.review?.demo_recording_url) console.warn("note: review.demo_recording_url is not set; enter the video URL in the portal or add it here");
 for (const c of tc.positive ?? []) if (!c.prompt || !c.tools_triggered || !c.expected_behavior) fail(`positive case "${c.description}" needs prompt, tools_triggered, expected_behavior`);
 
 // Exactly one remote MCP server.

@@ -1,7 +1,7 @@
 {
   "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
   "name": "webcrawl-anything",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "description": "Search the web, read pages and documents as Markdown with source links, map and crawl sites, and watch pages for changes.",
   "author": {
     "name": "Brainfish",
@@ -55,12 +55,6 @@
               "expected_behavior": "Returns the version and date with links to the result pages it used."
             },
             {
-              "description": "Security search for CVEs",
-              "prompt": "Find recent critical CVEs for OpenSSL and list the fixed versions.",
-              "tools_triggered": "web_search",
-              "expected_behavior": "Calls web_search with category security and lists CVE IDs, severity and fixed versions with NVD or OSV links."
-            },
-            {
               "description": "Map a site's pages",
               "prompt": "List the documentation pages on https://modelcontextprotocol.io.",
               "tools_triggered": "web_map",
@@ -82,15 +76,18 @@
           "negative": [
             {
               "description": "Purchases are not supported",
-              "prompt": "Buy the cheapest MacBook Air on apple.com for me."
+              "prompt": "Buy the cheapest MacBook Air on apple.com for me.",
+              "expected_behavior": "Does not place an order. Explains that Webcrawl only reads public pages and can look up current prices or watch the product page instead."
             },
             {
               "description": "Private pages behind a login are not accessed",
-              "prompt": "Read my Gmail inbox and summarize unread emails."
+              "prompt": "Read my Gmail inbox and summarize unread emails.",
+              "expected_behavior": "Does not call a tool. Explains that Webcrawl reads public pages only and cannot sign in to private accounts."
             },
             {
               "description": "Unrelated request",
-              "prompt": "Write me a poem about autumn."
+              "prompt": "Write me a poem about autumn.",
+              "expected_behavior": "Answers without calling any Webcrawl tool, because no web lookup is needed."
             }
           ]
         },
