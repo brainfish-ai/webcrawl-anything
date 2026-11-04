@@ -59,6 +59,7 @@ export function formatSearch(res: Rec): string {
 }
 
 export function formatScrape(res: Rec): string {
+  if (res.success === false && str(res.error)) {return `Error: ${str(res.error)}`;}
   const d = isRec(res.data) ? res.data : res;
   return str(d.markdown) || str(d.content) || "(no content returned)";
 }

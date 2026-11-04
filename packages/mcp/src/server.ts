@@ -140,6 +140,10 @@ export function createWebcrawlMcpServer(
     ({ url, no_cache }) =>
       run(async () => {
         const res = await client.scrape({ url, formats: ["markdown"], noCache: no_cache });
+        // Blocked pages: surface as a tool error (isError) instead of empty content.
+        if (res.success === false && typeof res.error === "string") {
+          throw new Error(formatScrape(res) + formatCredits(res));
+        }
         return formatScrape(res) + formatCredits(res);
       })
   );

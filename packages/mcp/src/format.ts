@@ -78,6 +78,7 @@ export function formatCredits(res: Rec): string {
 }
 
 export function formatScrape(res: Rec): string {
+  if (res.success === false && str(res.error)) {return `Error: ${str(res.error)}`;}
   const d = isRec(res.data) ? res.data : res;
   const title = str(d.title) || (isRec(d.metadata) ? str(d.metadata.title) : "");
   const md = str(d.markdown) || str(d.content);

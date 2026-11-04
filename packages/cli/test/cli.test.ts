@@ -45,6 +45,15 @@ describe("webcrawl CLI", () => {
     assert.equal(t.out(), "# Hello\n");
   });
 
+  it("scrape of a blocked page prints the error and exits 1", async () => {
+    const t = setup(() => ({
+      json: { success: false, blocked: true, error: "Blocked by the site's bot check (HTTP 403).", data: { markdown: "" } },
+    }));
+    assert.equal(await t.run(["scrape", "https://a.com"]), 1);
+    assert.equal(t.out(), "");
+    assert.match(t.err(), /Error: Blocked by the site's bot check \(HTTP 403\)/);
+  });
+
   it("usage errors exit 2 without calling the API", async () => {
     const t = setup();
     assert.equal(await t.run(["search"]), 2);

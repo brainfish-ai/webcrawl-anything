@@ -531,8 +531,13 @@ export async function main(argv: string[], io: Io, deps: Deps = {}): Promise<num
       }
       case "scrape": {
         const res = await client.scrape({ url: need("url"), formats: ["markdown"], noCache: v["no-cache"] });
+        // Blocked pages come back as success:false: report on stderr and exit 1, not empty content.
+        if (res.success === false && !v.json) {
+          io.err(`${formatScrape(res)}\n`);
+          return 1;
+        }
         emit(res, formatScrape(res));
-        return 0;
+        return res.success === false ? 1 : 0;
       }
       case "map": {
         const res = await client.map({ url: need("url"), search: v.filter, limit: int(v.limit, "--limit") });
