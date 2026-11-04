@@ -108,7 +108,7 @@ npx webcrawl scrape https://arxiv.org/abs/1706.03762
 
 Expected: title, all 8 authors, the abstract (28.4 BLEU on WMT 2014 EN-DE, 41.8 on EN-FR).
 
-Use the `/abs/` page. Direct `/pdf/` links are not reliable in local mode yet.
+Use the `/abs/` page. Direct `/pdf/` links work too — the local engine detects PDFs by content type and `%PDF-` magic bytes, not the URL.
 
 ## 6. What changed this year, with sources
 

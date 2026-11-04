@@ -25,7 +25,7 @@ import {
 import { isRenderProviderEnabled, renderViaProvider } from "./engine/render.js";
 import { fetchResource, lastFetchTier, needsBrowserEscalation } from "./engine/fetcher.js";
 import { parseFile, publicParseMeta } from "./parse/index.js";
-import { isBinaryContentType, looksLikeBinaryUrl } from "./parse/fetch.js";
+import { fetchAndParse, isBinaryContentType, looksLikeBinaryUrl } from "./parse/fetch.js";
 import { maxDownloadBytes } from "./parse/limits.js";
 import { parseYouTubeCached, youtubeVideoId } from "./parse/youtube.js";
 import { rankDocuments, type RawCandidateDocument } from "./ranker.js";
@@ -260,6 +260,44 @@ export function createLocalEngineClient(): LocalEngineBackend {
       }
 
       const fetched = await fetchWithTlsImpersonation(targetUrl);
+
+      //    Extension-less document URLs (arxiv.org/pdf/<id>) slip past the
+      //    URL gate in step 2 and arrive here as raw bytes. When the response
+      //    declares a document type or the decoded head still carries the
+      //    %PDF- signature, re-fetch binary-safe and take the documents
+      //    pipeline instead of mangling the bytes as HTML.
+      if (
+        isBinaryContentType(fetched.headers["content-type"]) ||
+        fetched.html.slice(0, 16).startsWith("%PDF-")
+      ) {
+        const doc = await fetchAndParse(targetUrl, { bypassCache: p.noCache });
+        if (doc) {
+          const docUrl = doc.resource.url || targetUrl;
+          return {
+            success: true,
+            mode: "local",
+            url: docUrl,
+            title: doc.result.title,
+            markdown: doc.result.markdown,
+            data: {
+              url: docUrl,
+              title: doc.result.title,
+              markdown: doc.result.markdown,
+              metadata: { parse: publicParseMeta(doc.result) },
+            },
+            evidence: {
+              targetId: "pdf-office",
+              tier: doc.result.meta.method === "ocr" ? "ocr" : "native-parser",
+              contentHash: doc.result.contentHash,
+              latencyMs: Date.now() - start,
+              sourceUrl: docUrl,
+              matchedSignals: [`parse:${doc.result.meta.kind}:${doc.result.meta.method}`],
+              limitations: doc.result.meta.warnings,
+            },
+          };
+        }
+      }
+
       const { title, markdown, links } = fastHtmlToMarkdown(fetched.html, targetUrl);
       const contentHash = sha256(markdown || fetched.html);
 
