@@ -41,6 +41,22 @@ export function isPrivateAddress(ip: string): boolean {
   return true;
 }
 
+/**
+ * True for 198.18.0.0/15, the benchmarking range that fake-IP proxies
+ * (Clash, Surge, sing-box, some VPN clients) hand out for every hostname.
+ */
+export function isFakeIpAddress(ip: string): boolean {
+  const s = ip.toLowerCase().replace(/^::ffff:/, "");
+  if (isIP(s) !== 4) return false;
+  const [a, b] = s.split(".").map(Number);
+  return a === 198 && (b === 18 || b === 19);
+}
+
+export const FAKE_IP_HINT =
+  "That address isn't publicly reachable: it resolved to 198.18.x.x, which fake-IP proxies " +
+  "(Clash, Surge, sing-box, some VPNs) return for every site. Switch the proxy to redir-host/real-IP " +
+  "DNS mode, or set WEBCRAWL_ALLOW_PRIVATE_URLS=true for local runs you trust.";
+
 export type HostResolver = (host: string) => Promise<string[]>;
 
 const defaultResolve: HostResolver = async (h) =>
@@ -80,7 +96,11 @@ export async function assertSafeUrl(
   }
   const addrs = isIP(host) ? [host] : await resolve(host).catch(() => []);
   if (addrs.length === 0) throw new UnsafeUrlError("We couldn't find that website");
-  if (addrs.some(isPrivateAddress)) throw new UnsafeUrlError();
+  if (addrs.some(isPrivateAddress)) {
+    // Every address in the fake-IP range means a local proxy rewrote DNS,
+    // not that the site is internal: say so and name the workaround.
+    throw new UnsafeUrlError(addrs.every(isFakeIpAddress) ? FAKE_IP_HINT : undefined);
+  }
   return u;
 }
 

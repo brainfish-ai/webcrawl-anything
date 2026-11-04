@@ -1,6 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { assertSafeUrl, followSafely, UnsafeUrlError } from "../engine/safe-url.js";
+import { assertSafeUrl, followSafely, isFakeIpAddress, UnsafeUrlError } from "../engine/safe-url.js";
 
 const pub = async () => ["93.184.216.34"];
 const priv = async () => ["10.0.0.5"];
@@ -21,6 +21,32 @@ describe("assertSafeUrl", () => {
   });
   it("rejects hosts that resolve to private addresses", async () => {
     await assert.rejects(assertSafeUrl("https://evil.example/", priv), UnsafeUrlError);
+  });
+  it("explains fake-IP proxy DNS (198.18.0.0/15) and names the workaround", async () => {
+    const fake = async () => ["198.18.0.42"];
+    await assert.rejects(assertSafeUrl("https://example.com/", fake), (e: Error) => {
+      assert.ok(e instanceof UnsafeUrlError);
+      assert.match(e.message, /fake-IP/);
+      assert.match(e.message, /WEBCRAWL_ALLOW_PRIVATE_URLS=true/);
+      return true;
+    });
+    // A real private address keeps the plain message.
+    await assert.rejects(assertSafeUrl("https://evil.example/", priv), (e: Error) => {
+      assert.doesNotMatch(e.message, /fake-IP/);
+      return true;
+    });
+    assert.equal(isFakeIpAddress("198.19.255.1"), true);
+    assert.equal(isFakeIpAddress("::ffff:198.18.0.1"), true);
+    assert.equal(isFakeIpAddress("198.20.0.1"), false);
+  });
+  it("still allows fake-IP addresses when WEBCRAWL_ALLOW_PRIVATE_URLS=true", async () => {
+    process.env.WEBCRAWL_ALLOW_PRIVATE_URLS = "true";
+    try {
+      const u = await assertSafeUrl("https://example.com/", async () => ["198.18.0.42"]);
+      assert.equal(u.hostname, "example.com");
+    } finally {
+      delete process.env.WEBCRAWL_ALLOW_PRIVATE_URLS;
+    }
   });
   it("accepts public hosts", async () => {
     const u = await assertSafeUrl("https://example.com/a", pub);

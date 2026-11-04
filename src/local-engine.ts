@@ -14,6 +14,7 @@ import {
   fastHtmlToMarkdown,
   fetchWithTlsImpersonation,
   getCachedPageAsync,
+  isChallengeMarkdown,
   mapWebsiteUrls,
   setCachedPage,
   sha256,
@@ -23,7 +24,12 @@ import {
   markDomainRenderNeeded,
 } from "./engine/session.js";
 import { isRenderProviderEnabled, renderViaProvider } from "./engine/render.js";
-import { fetchResource, lastFetchTier, needsBrowserEscalation } from "./engine/fetcher.js";
+import {
+  fetchResource,
+  isAntiBotChallenge,
+  lastFetchTier,
+  needsBrowserEscalation,
+} from "./engine/fetcher.js";
 import { parseFile, publicParseMeta } from "./parse/index.js";
 import { isBinaryContentType, looksLikeBinaryUrl } from "./parse/fetch.js";
 import { maxDownloadBytes } from "./parse/limits.js";
@@ -54,6 +60,35 @@ function safeDomainOf(url: string): string {
   } catch {
     return "";
   }
+}
+
+/**
+ * Scrape result for a page the site refused (bot check, 403/429/503).
+ * `success: false` with no markdown, so callers never mistake the block page
+ * for content. Exported for unit tests.
+ */
+export function blockedScrapeResult(
+  url: string,
+  statusCode: number,
+  tier: string,
+  latencyMs: number
+): Record<string, unknown> {
+  const error =
+    `Blocked by the site's bot check (HTTP ${statusCode}). No content was returned. ` +
+    "Retry with `--mode cloud` (hosted stealth browser), or self-host a render provider via WEBCRAWL_RENDER_URL.";
+  return {
+    success: false,
+    mode: "local",
+    url,
+    blocked: true,
+    statusCode,
+    error,
+    title: url,
+    markdown: "",
+    links: [],
+    data: { url, title: url, markdown: "", links: [] },
+    evidence: { tier, blocked: true, statusCode, latencyMs, limitations: [error] },
+  };
 }
 
 /**
@@ -185,7 +220,9 @@ export function createLocalEngineClient(): LocalEngineBackend {
       // 3. Check local cache first
       if (!p.noCache) {
         const cached = await getCachedPageAsync(targetUrl, "none");
-        if (cached) {
+        // Entries written before blocked pages stopped being cached may hold a
+        // bot-check page: treat those as a miss and fetch again.
+        if (cached && !isChallengeMarkdown(cached.title, cached.markdown)) {
           const targetInspection = await inspectTarget({
             url: targetUrl,
             markdown: cached.markdown,
@@ -262,14 +299,19 @@ export function createLocalEngineClient(): LocalEngineBackend {
       const fetched = await fetchWithTlsImpersonation(targetUrl);
       const { title, markdown, links } = fastHtmlToMarkdown(fetched.html, targetUrl);
       const contentHash = sha256(markdown || fetched.html);
+      // A bot-check / 403 / 429 / 503 response is not the page: never cache it,
+      // or every retry for the next 24h would get the block page back.
+      const blocked = isAntiBotChallenge(fetched.html, fetched.status);
 
-      setCachedPage(targetUrl, "none", {
-        title,
-        markdown,
-        links,
-        statusCode: fetched.status,
-        contentHash,
-      });
+      if (!blocked) {
+        setCachedPage(targetUrl, "none", {
+          title,
+          markdown,
+          links,
+          statusCode: fetched.status,
+          contentHash,
+        });
+      }
 
       const targetInspection = await inspectTarget({
         url: targetUrl,
@@ -325,6 +367,9 @@ export function createLocalEngineClient(): LocalEngineBackend {
             : lastFetchTier() === "proxy-impersonate"
               ? "proxy-impersonate"
               : "impit-tls";
+        if (blocked) {
+          return blockedScrapeResult(targetUrl, fetched.status, nativeTier, Date.now() - start);
+        }
         return {
           success: true,
           mode: "local",
