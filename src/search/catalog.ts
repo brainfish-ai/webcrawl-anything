@@ -139,6 +139,8 @@ export interface SearchResponse {
   /** Structured CVE records from NVD and OSV: CVSS score and severity, CWE, affected products and versions, fixed versions, CISA KEV flag, dates and references (populated when category === "security") */
   cves?: CveRecord[];
   provider: "native-federated" | "brave" | "serper" | "jina" | "ddg-edge";
+  /** Set when a keyless search returns no hits (engines blocked or empty). */
+  error?: string;
   /** Set when the primary engines came back thin and a paid fallback engine filled in. */
   fallback?: "jina";
   cached?: boolean;

@@ -71,6 +71,15 @@ describe("webcrawl MCP server", () => {
     assert.deepEqual(calls[0].body?.filters, { sites: ["booking.com"] });
   });
 
+  it("web_search with success:false is a tool error", async () => {
+    const { client } = await connect(() => ({
+      json: { success: false, error: "Keyless search engines returned no results.", data: [] },
+    }));
+    const r = await client.callTool({ name: "web_search", arguments: { query: "x" } });
+    assert.equal(r.isError, true);
+    assert.match(text(r), /Keyless search engines returned no results/);
+  });
+
   it("web_read returns markdown with title", async () => {
     const { client } = await connect(() => ({ json: { data: { title: "Hi", markdown: "# body" } } }));
     const r = await client.callTool({ name: "web_read", arguments: { url: "https://a.com" } });

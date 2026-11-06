@@ -323,11 +323,115 @@ export async function fetchHedgedNativeFederation(
     collected.push(...jina);
   }
 
+  // HTML SERPs (DDG, Brave) are frequently challenge/429 pages. When they
+  // yield nothing, fall back to keyless APIs that still work without a key.
+  if (collected.length === 0 && (!req.provider || req.provider === "auto")) {
+    const extras = await fetchKeylessSearchFallbacks(localizedQuery, perEngineLimit);
+    collected.push(...extras);
+  }
+
   return collected;
 }
 
 /** Below this many unique URLs from the free engines, the Jina fallback runs. */
 export const JINA_FALLBACK_MIN_URLS = 3;
+
+/** True when a scraped SERP is a bot-check / captcha rather than results. */
+export function isSerpChallengeHtml(html: string, status = 200): boolean {
+  if (status === 403 || status === 429 || status === 503) return true;
+  const lower = String(html ?? "").slice(0, 8000).toLowerCase();
+  return (
+    lower.includes("bots use duckduckgo") ||
+    lower.includes("anomaly-modal") ||
+    lower.includes("please complete the following challenge") ||
+    lower.includes("schedule a captcha") ||
+    lower.includes("flagged as being suspicious") ||
+    lower.includes("enable javascript to function")
+  );
+}
+
+export const EMPTY_SEARCH_ERROR =
+  "Keyless search engines returned no results (DuckDuckGo and Brave often serve a bot challenge). " +
+  "Tried Wikipedia, Hacker News, and Bing RSS as well. " +
+  "Set BRAVE_SEARCH_API_KEY, SERPER_API_KEY, or JINA_API_KEY, or retry later.";
+
+/** Parse Bing's `format=rss` web-search feed into candidate docs. */
+export function parseBingWebRss(xml: string, limit: number): RawCandidateDocument[] {
+  const items: RawCandidateDocument[] = [];
+  const itemRe = /<item>([\s\S]*?)<\/item>/gi;
+  let match: RegExpExecArray | null;
+  while ((match = itemRe.exec(xml)) !== null && items.length < limit) {
+    const block = match[1];
+    const title = decodeHtmlEntities(
+      (block.match(/<title>([\s\S]*?)<\/title>/i)?.[1] || "")
+        .replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g, "$1")
+        .trim()
+    );
+    const link = (block.match(/<link>([\s\S]*?)<\/link>/i)?.[1] || "")
+      .replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g, "$1")
+      .trim();
+    const description = decodeHtmlEntities(
+      (block.match(/<description>([\s\S]*?)<\/description>/i)?.[1] || "")
+        .replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g, "$1")
+        .replace(/<[^>]+>/g, " ")
+        .replace(/\s+/g, " ")
+        .trim()
+    );
+    if (!title || !link.startsWith("http")) continue;
+    items.push({
+      title,
+      url: link,
+      description: description || title,
+      engine: "bing-rss",
+      engineRank: items.length + 1,
+    });
+  }
+  return items;
+}
+
+async function fetchBingWebRss(query: string, limit: number): Promise<RawCandidateDocument[]> {
+  try {
+    const rssUrl = `https://www.bing.com/search?format=rss&q=${encodeURIComponent(query)}`;
+    const res = await fetch(rssUrl, {
+      headers: {
+        Accept: "application/rss+xml, application/xml, text/xml;q=0.9, */*;q=0.8",
+        "User-Agent": "Mozilla/5.0 (compatible; WebCrawl/1.4; +https://webcrawl.app)",
+      },
+      signal: AbortSignal.timeout(4000),
+    });
+    if (!res.ok) return [];
+    const xml = await res.text();
+    if (!xml.includes("<item>")) return [];
+    return parseBingWebRss(xml, limit);
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Last-resort keyless engines used when DDG/Brave HTML SERPs come back empty.
+ * Wikipedia OpenSearch, HN Algolia, and Bing RSS do not require a JS challenge.
+ */
+export async function fetchKeylessSearchFallbacks(
+  query: string,
+  limit: number
+): Promise<RawCandidateDocument[]> {
+  const per = Math.max(limit, 5);
+  const [hn, wiki, bing] = await Promise.all([
+    fetchHackerNewsAlgolia(query, per),
+    fetchWikipediaOpenSearch(query, per),
+    fetchBingWebRss(query, per),
+  ]);
+  const seen = new Set<string>();
+  const out: RawCandidateDocument[] = [];
+  for (const item of [...hn, ...wiki, ...bing]) {
+    if (!item.url || seen.has(item.url)) continue;
+    seen.add(item.url);
+    out.push(item);
+    if (out.length >= Math.max(limit + 4, 8)) break;
+  }
+  return out;
+}
 
 export async function fetchJinaSearch(
   query: string,
@@ -594,7 +698,7 @@ export async function fetchBraveNativeSerp(
       query
     )}&source=web${countryParam}`;
     const res = await fetchWithTlsImpersonation(url, 2200);
-    if (res.status !== 200 || !res.html) {
+    if (res.status !== 200 || !res.html || isSerpChallengeHtml(res.html, res.status)) {
       return [];
     }
 
@@ -748,7 +852,7 @@ async function fetchDuckDuckGoLiteOnly(
       `https://lite.duckduckgo.com/lite/?q=${encodeURIComponent(query)}${klParam}`,
       2200
     );
-    if (liteRes && liteRes.html) {
+    if (liteRes && liteRes.html && !isSerpChallengeHtml(liteRes.html, liteRes.status)) {
       const html = liteRes.html;
       const linkMatches = Array.from(
         html.matchAll(

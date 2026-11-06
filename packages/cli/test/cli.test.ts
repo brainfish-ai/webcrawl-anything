@@ -45,6 +45,15 @@ describe("webcrawl CLI", () => {
     assert.equal(t.out(), "# Hello\n");
   });
 
+  it("failed search prints the error and exits 1", async () => {
+    const t = setup(() => ({
+      json: { success: false, error: "Keyless search engines returned no results.", data: [] },
+    }));
+    assert.equal(await t.run(["search", "x"]), 1);
+    assert.equal(t.out(), "");
+    assert.match(t.err(), /Error: Keyless search engines returned no results/);
+  });
+
   it("scrape of a blocked page prints the error and exits 1", async () => {
     const t = setup(() => ({
       json: { success: false, blocked: true, error: "Blocked by the site's bot check (HTTP 403).", data: { markdown: "" } },

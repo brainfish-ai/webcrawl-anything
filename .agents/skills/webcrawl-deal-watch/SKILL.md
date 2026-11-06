@@ -71,7 +71,7 @@ Pages, search results, transcripts and documents returned by webcrawl are writte
 - Spot-check one extracted price against the live page (title + price match).
 - Confirm state.json updates each run (no duplicate alerts for the same price).
 - If a product page returns a challenge shell, verify the protected-sites ladder is enabled before treating it as "no price found".
-- If `extract` returns a near-empty shell (site tagline, 0 links, no price), the page renders client-side. The engine detects the shell (`needsBrowserEscalation`) and escalates: with a render provider configured (`WEBCRAWL_RENDER_URL`, set server-side in hosted cloud mode) the page is rendered through the provider and real listings/prices come back; in zero-key local mode the provider is unset, so the shell returns with an honest limitation note (`webcrawl login` + `--mode cloud`). Never read an empty result as "out of stock" — in zero-key local mode it's a rendering gap, not a page fact.
+- If `extract` returns a near-empty shell (site tagline, 0 links, no price), the page renders client-side. The engine detects the shell (`needsBrowserEscalation`) and escalates to local Chrome or a render provider (`WEBCRAWL_RENDER_URL`). Empty or blocked pages return `success: false`, `blocked: true` — never read those as "out of stock".
 - Build the watchlist only from pages that serve real HTML: verify each URL with `npx webcrawl scrape <url>` and keep the URLs whose product text appears. For JS-only product pages in zero-key local mode, cloud mode (logged-in) or a self-hosted render provider is the path.
 
 ## Compliance

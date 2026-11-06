@@ -76,3 +76,12 @@ export {
   extractHotelListingsWithScaleDown,
   extractPropertyListingsWithScaleDown,
 } from "./scaledown.js";
+
+export {
+  extractByPromptAndSchema,
+  extractQuoteAuthorPairs,
+  hasCustomExtractRequest,
+  shapeQuoteAuthors,
+  wantsQuoteAuthorExtract,
+  type QuoteAuthor,
+} from "./structured.js";
