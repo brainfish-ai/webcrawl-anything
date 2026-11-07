@@ -214,7 +214,9 @@ export async function searchWeb(req: SearchRequest): Promise<SearchResponse> {
   }
 
   const perEngineLimit = Math.min(Math.max(limit + 4, 8), 15);
-  const quorumTimeoutMs = req.rankOptions?.quorumTimeoutMs ?? 1500;
+  // Must outlast DDG/Brave impersonation (2200ms) so a slow SERP is not cut off
+  // after Wikipedia's 2 hits — the v1.4.3 keyless-search failure mode.
+  const quorumTimeoutMs = req.rankOptions?.quorumTimeoutMs ?? 2800;
 
   // Stage 1: Hedged Multi-Engine Native Federation
   const collectedOffers: ProductOffer[] = [];
@@ -407,7 +409,7 @@ export async function searchWeb(req: SearchRequest): Promise<SearchResponse> {
   };
   let ranked = await rankDocuments(localizedSearchQuery, rankCandidates, rankOpts);
 
-  // Thin result set after ranking and filtering: ask Jina once, then re-rank the combined pool.
+  // Thin result set after ranking and filtering: ask the keyed search provider once, then re-rank.
   const minResults = Math.min(3, limit);
   if (
     (!req.provider || req.provider === "auto") &&
@@ -922,7 +924,7 @@ export async function searchWeb(req: SearchRequest): Promise<SearchResponse> {
     };
   });
 
-  // Charge the fallback surcharge only when a Jina result actually reached the caller.
+  // Charge the fallback surcharge only when a keyed-provider result actually reached the caller.
   // An explicitly chosen provider is not a fallback.
   const usedJinaFallback =
     (!req.provider || req.provider === "auto") &&

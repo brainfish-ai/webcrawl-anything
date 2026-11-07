@@ -69,7 +69,7 @@ No agent? Use the CLI directly: `npx webcrawl search "react 19 compiler"`.
 | Target | Returns | Requirements |
 |---|---|---|
 | **Websites & JS SPAs** (`web`) | Clean Markdown, semantic headings, tables, code blocks, links, OpenGraph/JSON-LD, and SHA-256 content hashes | Zero-key local (`impit` TLS impersonation + local Chrome) or [`webcrawl.app`](https://webcrawl.app) cloud stealth browsers |
-| **PDF & Office Docs** (`pdf-office`) | Page-numbered Markdown, tables, slide notes, and automatic OCR on scanned PDF pages (`pagesOcr` + honest `pagesSkipped`) | Built-in (`@firecrawl/pdf-inspector`, `pdf-parse`, `mammoth`, `officeparser`, `tesseract.js`) |
+| **PDF & Office Docs** (`pdf-office`) | Page-numbered Markdown, tables, slide notes, and automatic OCR on scanned PDF pages (`pagesOcr` + honest `pagesSkipped`) | Built-in PDF inspector plus `pdf-parse`, `mammoth`, `officeparser`, and `tesseract.js` |
 | **YouTube & Media** (`youtube-media`) | Timestamped transcript Markdown, video title/channel/duration metadata, and spoken audio transcription | Built-in zero-key YouTube multi-client caption extractor; optional audio transcription provider for raw MP3/MP4 |
 | **Shopping & Products** (`shopping`) | Multi-retailer price comparison, currency-normalized offers, stock status, ratings, review counts, and shipping | Zero-key local HTML/JSON-LD product extractor (`-c shopping`); optional `SERPER_API_KEY` |
 | **Flights & Hotels** (`travel`) | Structured flight routes (`origin`, `destination`, `airline`, `stops`, `price`) and hotel nightly rates, stars, and guest ratings | Zero-key local search + schema.org extractor (`-c flights` / `-c hotels`) |
@@ -185,8 +185,12 @@ Webcrawl Anything uses the **exact same TypeScript engine (`src/`)** locally and
 | **Core Engine & Target Plugins** | 100% shared (`src/engine`, `src/targets`, `src/extract`) | 100% shared |
 | **PDF, Office, YouTube & CVE Parsers** | Built-in local execution | Hosted + background async workers (`/v1/runs/:id`) |
 | **JavaScript-heavy pages** | Local `impit` TLS + local Chrome | Managed browser fleet + Cloudflare rendering |
-| **Search Fan-Out** | Built-in DuckDuckGo/Bing + BYO keys | Managed multi-provider fan-out (Serper, Brave, Jina, Tavily) |
+| **Search Fan-Out** | Built-in DuckDuckGo/Bing plus optional API keys | Managed multi-provider fan-out |
 | **Global Content Cache** | Local in-memory LRU | Sub-50ms global SHA-256 content-addressed cache |
+
+### How the engine works
+
+Static pages never launch Chrome. JavaScript pages use a CDP-driven local Chrome session with a readiness wait, a hard timeout, and fallback flags. If rendering cannot happen, the scrape is `success: false` (`needsJs`). Extract strips script and style tags and supports nested schemas. Search fans out across keyless sources and fills up to `n`. See [docs/engine.md](./docs/engine.md).
 
 To connect your CLI and MCP server to [`webcrawl.app`](https://webcrawl.app) cloud:
 

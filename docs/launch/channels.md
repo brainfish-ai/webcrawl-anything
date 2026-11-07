@@ -19,7 +19,7 @@ The REA pattern was to own one channel per day, then let creators carry it. Don'
 | D+3 → D+10 | **Newsletters**: TLDR AI, Ben's Bites, Console.dev, Changelog News, Latent Space, MCP-focused newsletters | Founder | Long tail |
 | D+7 | "Week one" follow-up post: stars, best community builds, what we fixed | Founder | Second wave and contributor pull |
 
-**Rules:** never ask for upvotes. Link HN from X, not the other way round. Answer the hard questions (ethics, robots.txt, versus Firecrawl or Jina) in the first hour.
+**Rules:** never ask for upvotes. Link HN from X, not the other way round. Answer the hard questions (ethics, robots.txt, why local-first) in the first hour.
 
 ---
 
@@ -44,7 +44,7 @@ The REA pattern was to own one channel per day, then let creators carry it. Don'
 > I'd love feedback on the target-plugin API (one file plus a test) and which sites break for you.
 
 **Prepared answers:**
-- *Versus Firecrawl or Jina Reader?* Same job, but local and free by default, with MCP and agent skills built in and provenance on every result. The hosted API is optional and runs the same engine.
+- *Why not a hosted scraping API?* Same job, but local and free by default, with MCP and agent skills built in and provenance on every result. The hosted API is optional and runs the same engine.
 - *Is this ethical?* It reads what a normal browser can, respects robots.txt and keeps polite rates. No purchase or auto-apply automation.
 - *Why so fast?* Most pages are a single TLS-impersonated fetch plus native parsers. A real browser only starts when a site challenges automated clients.
 

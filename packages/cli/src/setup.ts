@@ -223,7 +223,7 @@ export function runDoctor(
     status: foundChrome ? "ok" : "optional",
     detail: foundChrome
       ? `Found Chrome at ${foundChrome} (used to render JS pages)`
-      : "No local Chrome binary detected; static/TLS fetch works out of the box, or run `webcrawl login` for cloud stealth browsers",
+      : "No local Chrome binary detected; static pages still work. For JS pages install Chrome or `npx playwright install chromium-headless-shell`, or run `webcrawl login` for cloud stealth browsers",
   });
 
   // 4. Search providers
@@ -246,7 +246,7 @@ export function runDoctor(
   checks.push({
     name: "Document & Media parsers",
     status: "ok",
-    detail: "PDF (@firecrawl/pdf-inspector), Office (mammoth/officeparser), YouTube captions, NVD/OSV CVEs ready",
+    detail: "PDF inspector, Office (mammoth/officeparser), YouTube captions, NVD/OSV CVEs ready",
   });
 
   return { mode: effectiveMode, checks };

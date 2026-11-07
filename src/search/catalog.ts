@@ -82,7 +82,7 @@ export interface SearchRequest {
   bypassCache?: boolean;
   /**
    * Pick one search provider and skip the default multi-engine pipeline.
-   * `auto` (default) uses the free engines and falls back to Jina when results are thin.
+   * `auto` (default) uses the free engines and falls back to a keyed provider when results are thin.
    */
   provider?: SearchProviderChoice;
   rankOptions?: {
@@ -170,7 +170,7 @@ export interface CategoryDefinition {
 export const SEARCH_CATEGORY_CATALOG: Record<string, CategoryDefinition> = {
   general: {
     description: "Broad web search across general-purpose engines.",
-    engines: ["brave-native", "ddg-lite", "wikipedia"],
+    engines: ["brave-native", "ddg-lite", "wikipedia", "hn-algolia", "bing-rss"],
     localizeBy: "none",
     preferLocalDomains: false,
     subcategories: {

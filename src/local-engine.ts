@@ -17,7 +17,7 @@ import {
   isChallengeMarkdown,
   isLocalChromeAvailable,
   mapWebsiteUrls,
-  renderViaLocalChrome,
+  renderViaLocalChromeDetailed,
   setCachedPage,
   sha256,
 } from "./engine.js";
@@ -39,7 +39,10 @@ import { parseYouTubeCached, youtubeVideoId } from "./parse/youtube.js";
 import { rankDocuments, type RawCandidateDocument } from "./ranker.js";
 import { getSearchCategoriesCatalog, searchWeb } from "./search.js";
 import { inspectTarget, listTargets, resolveTarget } from "./targets.js";
-import { hasCustomExtractRequest } from "./extract/structured.js";
+import {
+  hasCustomExtractRequest,
+  isEmptyExtractResult,
+} from "./extract/structured.js";
 
 export interface LocalEngineBackend {
   readonly baseUrl: string;
@@ -96,6 +99,41 @@ export function blockedScrapeResult(
   };
 }
 
+/**
+ * JS page whose renderer failed. `success: false` so callers never treat the
+ * unrendered nav shell as content (v1.4.3 smoke test: 114 chars of nav with
+ * success:true after Chrome hung on --dump-dom).
+ */
+export function jsRenderFailedResult(
+  url: string,
+  statusCode: number,
+  tier: string,
+  latencyMs: number,
+  reason: string
+): Record<string, unknown> {
+  return {
+    success: false,
+    mode: "local",
+    url,
+    blocked: false,
+    needsJs: true,
+    statusCode,
+    error: reason,
+    title: url,
+    markdown: "",
+    links: [],
+    data: { url, title: url, markdown: "", links: [] },
+    evidence: {
+      tier,
+      blocked: false,
+      needsJs: true,
+      statusCode,
+      latencyMs,
+      limitations: [reason],
+    },
+  };
+}
+
 /** Shells shorter than this are unrendered JS / empty pages and must not be cached as content. */
 export const MIN_CACHEABLE_MARKDOWN = 200;
 
@@ -146,35 +184,61 @@ interface RenderedLocalPage {
   tier: string;
 }
 
+function defaultJsRenderError(): string {
+  return (
+    "Page needs JavaScript rendering; local Chrome was not available or produced no content. " +
+    "Install Chrome (see `webcrawl doctor`), point WEBCRAWL_CHROME_PATH at chrome-headless-shell " +
+    "(`npx playwright install chromium-headless-shell`), run `webcrawl login` and retry with `--mode cloud`, " +
+    "or self-host a render provider via WEBCRAWL_RENDER_URL."
+  );
+}
+
 /**
- * JS / challenge shell → render provider, then local Chrome dump-dom, then stealth.
- * Returns null when no renderer produced real content.
+ * JS / challenge shell → render provider, then local Chrome (CDP, then dump-dom),
+ * then stealth. Returns null when no renderer produced real content.
  */
-async function escalateJsRender(url: string): Promise<RenderedLocalPage | null> {
+async function escalateJsRender(
+  url: string
+): Promise<{ page: RenderedLocalPage | null; error?: string }> {
+  const errors: string[] = [];
   if (isRenderProviderEnabled()) {
     const rendered = await renderViaProvider(url);
     if (rendered && rendered.markdown.trim().length >= 40) {
       return {
-        title: rendered.title,
-        markdown: rendered.markdown,
-        html: "",
-        links: [],
-        tier: "render",
+        page: {
+          title: rendered.title,
+          markdown: rendered.markdown,
+          html: "",
+          links: [],
+          tier: "render",
+        },
       };
     }
+    errors.push("render provider produced no content");
   }
   if (isLocalChromeAvailable()) {
-    const html = await renderViaLocalChrome(url);
-    if (html && html.length > 100) {
-      const parsed = fastHtmlToMarkdown(html, url);
+    const chrome = await renderViaLocalChromeDetailed(url);
+    if (chrome.html && chrome.html.length > 100) {
+      const parsed = fastHtmlToMarkdown(chrome.html, url);
       if (
         parsed.markdown.trim().length > 40 &&
-        !isAntiBotChallenge(html, 200) &&
+        !isAntiBotChallenge(chrome.html, 200) &&
         !isChallengeMarkdown(parsed.title, parsed.markdown)
       ) {
-        return { ...parsed, html, tier: "browser" };
+        return { page: { ...parsed, html: chrome.html, tier: "browser" } };
       }
+      errors.push(
+        chrome.method
+          ? `${chrome.method} rendered HTML but markdown was still a shell`
+          : "local Chrome rendered HTML but markdown was still a shell"
+      );
+    } else if (chrome.error) {
+      errors.push(chrome.error);
+    } else {
+      errors.push("local Chrome produced no content");
     }
+  } else {
+    errors.push("no local Chrome/Chromium binary");
   }
   try {
     const { stealthAvailable } = await import("./engine/stealth.js");
@@ -187,18 +251,21 @@ async function escalateJsRender(url: string): Promise<RenderedLocalPage | null> 
         !isChallengeResult(esc.html, esc.markdown, esc.statusCode)
       ) {
         return {
-          title: esc.title,
-          markdown: esc.markdown,
-          html: esc.html,
-          links: esc.links,
-          tier: esc.tier,
+          page: {
+            title: esc.title,
+            markdown: esc.markdown,
+            html: esc.html,
+            links: esc.links,
+            tier: esc.tier,
+          },
         };
       }
+      errors.push("stealth browser produced no content");
     }
   } catch {
     /* stealth optional */
   }
-  return null;
+  return { page: null, error: errors.filter(Boolean).join("; ") || defaultJsRenderError() };
 }
 
 /**
@@ -422,13 +489,16 @@ export function createLocalEngineClient(): LocalEngineBackend {
       const nativeTier = nativeScrapeTier();
 
       //    JS shell / challenge: memoize the domain and escalate to a renderer
-      //    (hosted provider, local Chrome dump-dom, then stealth). Never cache
-      //    the unrendered shell.
+      //    (hosted provider, local Chrome CDP, then stealth). Never cache
+      //    the unrendered shell, and never report the shell as success:true.
       if (needsRender) {
         await markDomainRenderNeeded(renderDomain);
         // 403/429/503 is already a refusal — don't spend a Chrome launch on the block page.
-        const rendered =
-          blocked && fetched.status >= 400 ? null : await escalateJsRender(targetUrl);
+        const escalated =
+          blocked && fetched.status >= 400
+            ? { page: null, error: undefined as string | undefined }
+            : await escalateJsRender(targetUrl);
+        const rendered = escalated.page;
         if (rendered) {
           const renderHash = sha256(rendered.markdown);
           if (rendered.markdown.trim().length >= MIN_CACHEABLE_MARKDOWN) {
@@ -467,52 +537,20 @@ export function createLocalEngineClient(): LocalEngineBackend {
             p.formats
           );
         }
-        if (blocked || !markdown.trim()) {
+        if (blocked) {
           return blockedScrapeResult(
             targetUrl,
             fetched.status,
             nativeTier,
-            Date.now() - start,
-            blocked ? undefined : emptyPageError(fetched.status)
+            Date.now() - start
           );
         }
-        const targetInspection = await inspectTarget({
-          url: targetUrl,
-          html,
-          markdown,
-        });
-        return withOptionalHtml(
-          {
-            success: true,
-            mode: "local",
-            url: targetUrl,
-            title: title || targetInspection.title || targetUrl,
-            markdown: targetInspection.markdown || markdown,
-            links,
-            data: {
-              url: targetUrl,
-              title: title || targetInspection.title || targetUrl,
-              markdown: targetInspection.markdown || markdown,
-              links,
-              structured: targetInspection.structured,
-            },
-            evidence: {
-              ...targetInspection.evidence,
-              tier: nativeTier,
-              contentHash: sha256(markdown || html),
-              latencyMs: Date.now() - start,
-              limitations: [
-                ...(Array.isArray(targetInspection.evidence?.limitations)
-                  ? (targetInspection.evidence.limitations as string[])
-                  : []),
-                "Page needs JS rendering; local Chrome was not available or produced no content. " +
-                  "Install Chrome (see `webcrawl doctor`), run `webcrawl login` and retry with `--mode cloud`, " +
-                  "or self-host a render provider via WEBCRAWL_RENDER_URL.",
-              ],
-            },
-          },
-          html,
-          p.formats
+        return jsRenderFailedResult(
+          targetUrl,
+          fetched.status,
+          nativeTier,
+          Date.now() - start,
+          escalated.error || (!markdown.trim() ? emptyPageError(fetched.status) : defaultJsRenderError())
         );
       }
 
@@ -698,28 +736,43 @@ export function createLocalEngineClient(): LocalEngineBackend {
       })) as {
         success?: boolean;
         blocked?: boolean;
+        needsJs?: boolean;
         error?: string;
         markdown?: string;
         html?: string;
         title?: string;
         data?: { structured?: Record<string, unknown>; markdown?: string; title?: string; html?: string };
       };
-      const markdown = (scraped.data && scraped.data.markdown) || scraped.markdown || "";
-      const html = (scraped.data && scraped.data.html) || scraped.html || "";
+      let markdown = (scraped.data && scraped.data.markdown) || scraped.markdown || "";
+      let html = (scraped.data && scraped.data.html) || scraped.html || "";
       if (scraped.blocked || scraped.success === false) {
-        return {
-          success: false,
-          blocked: true,
-          mode: "local",
-          url: targetUrl,
-          data: {},
-          error: scraped.error || emptyPageError(200),
-          evidence: {
-            tier: lastFetchTier(),
-            sourceUrl: targetUrl,
-            limitations: [String(scraped.error || emptyPageError(200))],
-          },
-        };
+        // Bot-blocked pages stay failures. A JS shell whose Chrome render failed
+        // can still yield structured data from JSON islands once script tags are
+        // stripped for card matching — never from `document.write` templates.
+        if (scraped.needsJs && scraped.blocked !== true) {
+          try {
+            const fetched = await fetchWithTlsImpersonation(targetUrl);
+            html = fetched.html || html;
+            const parsedShell = fastHtmlToMarkdown(html, targetUrl);
+            markdown = parsedShell.markdown || markdown;
+          } catch {
+            /* keep whatever scrape returned */
+          }
+        } else {
+          return {
+            success: false,
+            blocked: true,
+            mode: "local",
+            url: targetUrl,
+            data: {},
+            error: scraped.error || emptyPageError(200),
+            evidence: {
+              tier: lastFetchTier(),
+              sourceUrl: targetUrl,
+              limitations: [String(scraped.error || emptyPageError(200))],
+            },
+          };
+        }
       }
 
       const targetInspection = await inspectTarget({
@@ -735,15 +788,36 @@ export function createLocalEngineClient(): LocalEngineBackend {
         bypassCache: true,
       });
       const { cached: _c, cacheLayer: _l, ...extracted } = siteData;
+      const data = extractOutputData(extracted, {
+        prompt: p.prompt,
+        schema: p.schema,
+        target: targetInspection.structured,
+      });
+      if (hasCustomExtractRequest(p.prompt, p.schema) && isEmptyExtractResult(data)) {
+        const error =
+          "Extraction produced no data matching the prompt/schema. " +
+          "If this is a JS-rendered page, install Chrome (see `webcrawl doctor`) and retry; " +
+          "empty objects are not reported as success.";
+        return {
+          success: false,
+          mode: "local",
+          url: targetUrl,
+          data: {},
+          error,
+          evidence: {
+            ...targetInspection.evidence,
+            limitations: [
+              ...((targetInspection.evidence?.limitations as string[] | undefined) ?? []),
+              error,
+            ],
+          },
+        };
+      }
       return {
         success: true,
         mode: "local",
         url: targetUrl,
-        data: extractOutputData(extracted, {
-          prompt: p.prompt,
-          schema: p.schema,
-          target: targetInspection.structured,
-        }),
+        data,
         evidence: targetInspection.evidence,
       };
     },

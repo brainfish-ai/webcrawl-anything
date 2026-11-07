@@ -574,7 +574,7 @@ const BUILTIN_CLIENT_TARGETS = [
     id: "pdf-office",
     name: "PDFs & Office Documents (DOCX, XLSX, PPTX)",
     returns: "Page-numbered Markdown, tables, native text extraction, automatic OCR on scanned pages",
-    requirements: "Built-in (@firecrawl/pdf-inspector, pdf-parse, mammoth, officeparser, tesseract.js)",
+    requirements: "Built-in (PDF inspector, pdf-parse, mammoth, officeparser, tesseract.js)",
   },
   {
     id: "cve",
