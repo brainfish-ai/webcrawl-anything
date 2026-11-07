@@ -52,7 +52,16 @@ jobs:
           # lockfile is part of the release commit (avoids ETARGET for versions
           # that are not on the registry yet).
           bash scripts/release.sh "${{ inputs.bump }}" --no-publish --no-push
-          git push origin HEAD:main --follow-tags
+          VERSION=$(node -p "require('./packages/cli/package.json').version")
+          # Push the branch first, then the tag. `git push --follow-tags` can
+          # create the remote tag even when the protected-main update is
+          # rejected, which leaves a dangling tag and skips npm publish.
+          if ! git push origin HEAD:main; then
+            echo "::error::Push to main was rejected. main is a protected branch, so workflow_dispatch bump cannot land the release commit directly."
+            echo "Open a pull request with the version bump, merge it, then re-run this workflow with bump=none."
+            exit 1
+          fi
+          git push origin "v${VERSION}"
 
       - name: Build workspace packages
         run: npm run build:packages
@@ -170,8 +179,30 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          set -euo pipefail
           VERSION=$(node -p "require('./packages/cli/package.json').version")
           TAG="v${VERSION}"
+          HEAD_SHA=$(git rev-parse HEAD)
+          # See the remote tag even if this checkout did not already have it.
+          git fetch origin "refs/tags/${TAG}:refs/tags/${TAG}" --force || true
+          # A previous failed bump can leave this tag pointing at a commit that
+          # is not on main. Recreate it on HEAD so the GitHub Release matches
+          # the commit that was just published.
+          if git rev-parse "refs/tags/${TAG}" >/dev/null 2>&1; then
+            TAG_SHA=$(git rev-parse "${TAG}^{commit}")
+            if [ "${TAG_SHA}" != "${HEAD_SHA}" ]; then
+              echo "Tag ${TAG} points at ${TAG_SHA}, not the commit being released (${HEAD_SHA})."
+              echo "Moving ${TAG} to HEAD so the GitHub Release matches this publish."
+              git config user.name "github-actions[bot]"
+              git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+              git tag -fa "${TAG}" -m "Release ${TAG}"
+              git push origin "refs/tags/${TAG}" --force
+              if gh release view "${TAG}" >/dev/null 2>&1; then
+                echo "GitHub Release ${TAG} exists on the previous tag commit; recreating it on HEAD."
+                gh release delete "${TAG}" --yes
+              fi
+            fi
+          fi
           if ! gh release view "$TAG" >/dev/null 2>&1; then
             gh release create "$TAG" --generate-notes --title "$TAG"
           fi

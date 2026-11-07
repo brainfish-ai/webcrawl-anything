@@ -1,6 +1,6 @@
 {
   "name": "@webcrawl/mcp",
-  "version": "1.4.3",
+  "version": "1.4.4",
   "mcpName": "io.github.brainfish-ai/webcrawl",
   "description": "MCP server for Webcrawl Anything: search, scrape, map, crawl, parse and monitor the web from your agent. Runs locally with no API key, or on webcrawl.app cloud.",
   "type": "module",
@@ -56,8 +56,8 @@
     "@firecrawl/pdf-inspector": "^1.25.2",
     "@modelcontextprotocol/sdk": "^1.32.2",
     "@vercel/sandbox": "^1.0.0",
-    "@webcrawl/client": "^1.4.3",
-    "@webcrawl/curl-impersonate": "^1.4.3",
+    "@webcrawl/client": "^1.4.4",
+    "@webcrawl/curl-impersonate": "^1.4.4",
     "ai": "^7.0.150",
     "impit": "^0.14.7",
     "mammoth": "^1.13.0",
