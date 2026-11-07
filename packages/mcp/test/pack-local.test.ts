@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, readdirSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { describe, it } from "node:test";
@@ -21,14 +21,27 @@ describe("packed @webcrawl/mcp local engine", { timeout: 180_000 }, () => {
     const home = join(tmp, "home");
     const configHome = join(tmp, "xdg");
     try {
-      execFileSync("npm", ["pack", "--pack-destination", tmp], {
-        cwd: mcpRoot,
-        stdio: "pipe",
-        env: { ...process.env },
-      });
-      const tarball = readdirSync(tmp).find((n) => n.endsWith(".tgz"));
-      assert.ok(tarball, "npm pack should emit a tgz");
-      const tgz = join(tmp, tarball);
+      // Packed installs run outside the git workspace. Sibling @webcrawl/*
+      // versions are not on the registry yet during a version bump, so pack
+      // them too and install the local tarballs together (avoids ETARGET).
+      const packDir = join(tmp, "tarballs");
+      mkdirSync(packDir);
+      const workspacePackDirs = [
+        join(repoRoot, "packages", "client"),
+        join(repoRoot, "packages", "curl-impersonate"),
+        mcpRoot,
+      ];
+      for (const pkgDir of workspacePackDirs) {
+        execFileSync("npm", ["pack", "--pack-destination", packDir], {
+          cwd: pkgDir,
+          stdio: "pipe",
+          env: { ...process.env },
+        });
+      }
+      const tarballs = readdirSync(packDir).filter((n) => n.endsWith(".tgz")).map((n) => join(packDir, n));
+      const tgz = tarballs.find((n) => /webcrawl-mcp-/.test(n));
+      assert.ok(tgz, "npm pack should emit the MCP tgz");
+      assert.equal(tarballs.length, workspacePackDirs.length, `expected ${workspacePackDirs.length} workspace tarballs`);
 
       const listing = execFileSync("tar", ["-tzf", tgz], { encoding: "utf8" });
       assert.match(listing, /package\/dist\/bin\.js/);
@@ -40,7 +53,7 @@ describe("packed @webcrawl/mcp local engine", { timeout: 180_000 }, () => {
       assert.match(binJs, /load-local-engine|core\/local-engine/);
 
       execFileSync("npm", ["init", "-y"], { cwd: tmp, stdio: "pipe" });
-      execFileSync("npm", ["install", tgz], {
+      execFileSync("npm", ["install", ...tarballs], {
         cwd: tmp,
         stdio: "pipe",
         env: { ...process.env },
