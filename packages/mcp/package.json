@@ -47,13 +47,21 @@
     }
   },
   "scripts": {
-    "build": "tsc -p tsconfig.build.json",
+    "build": "tsc -p tsconfig.build.json && tsc -p tsconfig.core.json",
     "prepack": "npm run build",
     "test": "node --conditions=development --import tsx --test test/*.test.ts"
   },
   "dependencies": {
+    "@ai-sdk/gateway": "^4.0.123",
+    "@firecrawl/pdf-inspector": "^1.25.2",
     "@modelcontextprotocol/sdk": "^1.32.2",
+    "@vercel/sandbox": "^1.0.0",
     "@webcrawl/client": "^1.4.2",
+    "@webcrawl/curl-impersonate": "^1.4.2",
+    "ai": "^7.0.150",
+    "impit": "^0.14.7",
+    "mammoth": "^1.13.0",
+    "officeparser": "^8.2.0",
     "zod": "^4.0.0"
   },
   "engines": {

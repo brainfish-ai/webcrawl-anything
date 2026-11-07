@@ -120,6 +120,9 @@ export function createWebcrawlMcpServer(
           sites,
           scrapeContent: include_content,
         });
+        if (res.success === false && typeof res.error === "string") {
+          throw new Error(formatSearch(res) + formatCredits(res));
+        }
         return formatSearch(res) + formatCredits(res);
       })
   );

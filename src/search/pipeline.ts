@@ -76,6 +76,7 @@ import {
   type SearchResultItem,
 } from "./catalog.js";
 import {
+  EMPTY_SEARCH_ERROR,
   fetchHedgedNativeFederation,
   fetchJinaSearch,
   fetchNvdByIds,
@@ -926,27 +927,30 @@ export async function searchWeb(req: SearchRequest): Promise<SearchResponse> {
   const usedJinaFallback =
     (!req.provider || req.provider === "auto") &&
     finalItems.some((item) => item.sources?.includes("jina"));
+  const engines = ranked.rankingMetrics.enginesContributing;
   const provider: SearchResponse["provider"] =
-    ranked.rankingMetrics.enginesContributing.length > 1
+    engines.length > 1
       ? "native-federated"
-      : ranked.rankingMetrics.enginesContributing.includes("serper")
+      : engines.includes("serper")
         ? "serper"
-        : ranked.rankingMetrics.enginesContributing.includes("jina")
+        : engines.includes("jina")
           ? "jina"
-          : ranked.rankingMetrics.enginesContributing.includes("brave-api") ||
-            ranked.rankingMetrics.enginesContributing.includes("brave-native")
-          ? "brave"
-          : "ddg-edge";
+          : engines.includes("brave-api") || engines.includes("brave-native")
+            ? "brave"
+            : engines.includes("ddg-lite")
+              ? "ddg-edge"
+              : "native-federated";
 
-  if (
+  const hasHits =
     finalItems.length > 0 ||
     (products && products.length > 0) ||
     (dedupedListings && dedupedListings.length > 0) ||
     (dedupedFlights && dedupedFlights.length > 0) ||
     (dedupedHotels && dedupedHotels.length > 0) ||
     (dedupedBusinesses && dedupedBusinesses.length > 0) ||
-    (dedupedCves && dedupedCves.length > 0)
-  ) {
+    (dedupedCves && dedupedCves.length > 0);
+
+  if (hasHits) {
     searchCache.set(cacheKey, {
       data: finalItems,
       ...(products ? { products } : {}),
@@ -960,6 +964,19 @@ export async function searchWeb(req: SearchRequest): Promise<SearchResponse> {
       rankingMetrics: ranked.rankingMetrics,
       expiresAt: Date.now() + SEARCH_CACHE_TTL_MS,
     });
+  }
+
+  if (!hasHits) {
+    return {
+      success: false,
+      data: [],
+      provider,
+      error: EMPTY_SEARCH_ERROR,
+      cached: false,
+      latencyMs: Math.round(performance.now() - start),
+      ...(hasGeo ? { userLocation } : {}),
+      rankingMetrics: ranked.rankingMetrics,
+    };
   }
 
   return {

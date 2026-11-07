@@ -64,7 +64,9 @@ export function formatSearch(res: Rec): string {
         .join("\n")}`
     );
   }
-  return parts.length ? parts.join("\n\n") : "No results.";
+  if (parts.length) return parts.join("\n\n");
+  if (res.success === false && str(res.error)) return `Error: ${str(res.error)}`;
+  return "No results.";
 }
 
 export function formatCredits(res: Rec): string {

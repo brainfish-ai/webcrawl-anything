@@ -207,18 +207,22 @@ export function runDoctor(
 
   // 3. Local Chrome / Stealth Browser availability
   const chromePaths = [
+    env.WEBCRAWL_CHROME_PATH,
+    env.INTERACT_CHROME_PATH,
     env.CHROME_PATH,
     "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
     "/usr/bin/google-chrome",
+    "/usr/bin/google-chrome-stable",
     "/usr/bin/chromium",
     "/usr/bin/chromium-browser",
+    "/snap/bin/chromium",
   ].filter(Boolean) as string[];
   const foundChrome = chromePaths.find((p) => existsSync(p));
   checks.push({
     name: "Local stealth browser",
     status: foundChrome ? "ok" : "optional",
     detail: foundChrome
-      ? `Found Chrome at ${foundChrome}`
+      ? `Found Chrome at ${foundChrome} (used to render JS pages)`
       : "No local Chrome binary detected; static/TLS fetch works out of the box, or run `webcrawl login` for cloud stealth browsers",
   });
 

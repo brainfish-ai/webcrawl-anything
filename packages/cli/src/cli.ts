@@ -526,8 +526,12 @@ export async function main(argv: string[], io: Io, deps: Deps = {}): Promise<num
           city: v.city,
           scrapeContent: v.content,
         });
+        if (res.success === false && !v.json) {
+          io.err(`${formatSearch(res)}\n`);
+          return 1;
+        }
         emit(res, formatSearch(res));
-        return 0;
+        return res.success === false ? 1 : 0;
       }
       case "scrape": {
         const res = await client.scrape({ url: need("url"), formats: ["markdown"], noCache: v["no-cache"] });

@@ -3,7 +3,7 @@
 ## Empty or boilerplate output
 
 - **Challenge shell** (tiny output, "Checking your browser", status 403/429/202): the site challenged the client — escalate via the protected-sites tier ladder (see the `webcrawl-protected-sites` skill). Do NOT conclude "no content exists".
-- **JS-rendered SPA** (skeleton with no data): the page renders client-side. The stealth-browser tier runs a real Chrome; run `npx webcrawl doctor` to confirm local Chrome is available.
+- **JS-rendered SPA** (skeleton with no data): the page renders client-side. Local mode escalates to installed Chrome (`webcrawl doctor` reports the binary; override with `WEBCRAWL_CHROME_PATH`) and hydrates the DOM. Empty or bot-blocked pages return `success: false`, `blocked: true` instead of an empty success.
 - **Wrong URL** (404): check the URL actually resolves in a browser before debugging webcrawl.
 
 ## Command failures
@@ -12,7 +12,9 @@
 |---|---|
 | `impit` binary missing | `npx webcrawl doctor` — reinstall or use cloud mode |
 | Timeout on large pages | retry once; if persistent, the site may rate-limit — slow down or add proxy |
+| `extract` returns generic `{app_name, product_features}` | Pass `--prompt` and/or `--schema`; extract follows those instead of the default product-feature shape. |
 | `extract` returns nothing | The prompt may target content not in the Markdown (JS-rendered). Scrape first, inspect the Markdown, adjust the prompt. |
+| Local `search` is empty or errors | Keyless HTML SERPs (DuckDuckGo/Brave) are often challenged. The engine falls back to Wikipedia, Hacker News, and Bing RSS; if those are empty too it returns `success: false` with a hint to set `BRAVE_SEARCH_API_KEY` / `SERPER_API_KEY` / `JINA_API_KEY`. |
 | `map` finds few URLs | Site may block sitemap.xml; try `--filter` with broader terms or crawl from the index page |
 
 ## Rate limiting & politeness

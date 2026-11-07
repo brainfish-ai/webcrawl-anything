@@ -1,9 +1,12 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
 import { describe, it } from "node:test";
+import { fileURLToPath } from "node:url";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { WebcrawlClient } from "@webcrawl/client";
-import { MAX_OUTPUT_CHARS, createServer } from "../src/index.js";
+import { LOCAL_ENGINE_LOAD_ERROR, MAX_OUTPUT_CHARS, createServer } from "../src/index.js";
 
 type Handler = (url: string, body: Record<string, unknown> | undefined) => { status?: number; json: unknown };
 
@@ -69,6 +72,15 @@ describe("webcrawl MCP server", () => {
     assert.match(text(r), /98 remaining/);
     assert.equal(calls[0].url, "https://x.test/v1/search");
     assert.deepEqual(calls[0].body?.filters, { sites: ["booking.com"] });
+  });
+
+  it("web_search with success:false is a tool error", async () => {
+    const { client } = await connect(() => ({
+      json: { success: false, error: "Keyless search engines returned no results.", data: [] },
+    }));
+    const r = await client.callTool({ name: "web_search", arguments: { query: "x" } });
+    assert.equal(r.isError, true);
+    assert.match(text(r), /Keyless search engines returned no results/);
   });
 
   it("web_read returns markdown with title", async () => {
@@ -257,5 +269,13 @@ describe("webcrawl MCP server", () => {
 
     const deleted = await client.callTool({ name: "web_monitor", arguments: { action: "delete", id: "mon_42" } });
     assert.match(text(deleted), /Monitor deleted\./);
+  });
+
+  it("stdio binary never silently falls back to webcrawl.app", () => {
+    const bin = readFileSync(join(dirname(fileURLToPath(import.meta.url)), "../src/bin.ts"), "utf8");
+    assert.doesNotMatch(bin, /falling back to https:\/\/webcrawl\.app/);
+    assert.match(bin, /loadLocalEngineClient/);
+    assert.match(bin, /process\.exit\(1\)/);
+    assert.match(LOCAL_ENGINE_LOAD_ERROR, /Reinstall @webcrawl\/mcp/);
   });
 });

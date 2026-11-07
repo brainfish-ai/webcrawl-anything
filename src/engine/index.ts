@@ -8,4 +8,6 @@ export * from "./fetcher.js";
 
 export * from "./render.js";
 
+export * from "./chrome.js";
+
 export * from "./crawler.js";

@@ -13,6 +13,7 @@ const ENGINE_WEIGHTS: Record<SearchEngineSource, number> = {
   jina: 1.3,
   "brave-native": 1.25,
   "ddg-lite": 1.15,
+  "bing-rss": 1.12,
   "google-news-rss": 1.05,
   wikipedia: 1.1,
   "hn-algolia": 1.0,

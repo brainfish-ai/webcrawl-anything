@@ -16,6 +16,7 @@ import {
   RENDER_MEMO_TTL_MS,
 } from "../engine/session.js";
 import { needsBrowserEscalation } from "../engine/fetcher.js";
+import { installedChromePath, isLocalChromeAvailable } from "../engine/chrome.js";
 
 const readerResponse = (title: string, markdown: string) =>
   `Title: ${title}\n\nURL Source: https://example.com/page\n\nMarkdown Content:\n\n${markdown}\n`;
@@ -211,6 +212,17 @@ test("renderViaProvider keyless rate guard caps at 15 requests/min", async () =>
   }
 });
 
+test("needsBrowserEscalation detects quotes.toscrape.com/js header-only script pages", () => {
+  const html = `<html><body><h1>Quotes to Scrape</h1>
+<script>
+var data = [{"author":{"name":"Albert Einstein"},"text":"The world as we have created it."}];
+for (var i in data) { document.write("<div class='quote'>"+data[i].text+"</div>"); }
+</script></body></html>`;
+  const markdown = "# Quotes to Scrape\n\nLogin\n\nNext";
+  assert.ok(markdown.length < 120);
+  assert.equal(needsBrowserEscalation(200, html, markdown), true);
+});
+
 test("needsBrowserEscalation detects challenge shells and empty SPA shells", () => {
   // StubHub-style IP-reputation shell (status 200, text marker)
   assert.equal(
@@ -249,6 +261,20 @@ test("needsBrowserEscalation detects challenge shells and empty SPA shells", () 
     ),
     false
   );
+  // empty body (Reddit-style 200 with no readable text)
+  assert.equal(needsBrowserEscalation(200, "<html><body></body></html>", ""), true);
+});
+
+test("installedChromePath honours WEBCRAWL_CHROME_PATH", () => {
+  const prev = process.env.WEBCRAWL_CHROME_PATH;
+  process.env.WEBCRAWL_CHROME_PATH = "/tmp/does-not-need-to-exist-chrome";
+  try {
+    assert.equal(installedChromePath(), "/tmp/does-not-need-to-exist-chrome");
+    assert.equal(isLocalChromeAvailable(), true);
+  } finally {
+    if (prev === undefined) delete process.env.WEBCRAWL_CHROME_PATH;
+    else process.env.WEBCRAWL_CHROME_PATH = prev;
+  }
 });
 
 test("render-needed memo marks and expires domains", async () => {
