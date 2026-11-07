@@ -83,6 +83,18 @@ describe("webcrawl MCP server", () => {
     assert.match(text(r), /Keyless search engines returned no results/);
   });
 
+  it("web_extract with success:false is a tool error", async () => {
+    const { client } = await connect(() => ({
+      json: { success: false, error: "Extraction produced no data matching the prompt/schema.", data: {} },
+    }));
+    const r = await client.callTool({
+      name: "web_extract",
+      arguments: { url: "https://a.com", prompt: "quotes" },
+    });
+    assert.equal(r.isError, true);
+    assert.match(text(r), /Extraction produced no data matching the prompt\/schema/);
+  });
+
   it("web_read returns markdown with title", async () => {
     const { client } = await connect(() => ({ json: { data: { title: "Hi", markdown: "# body" } } }));
     const r = await client.callTool({ name: "web_read", arguments: { url: "https://a.com" } });
