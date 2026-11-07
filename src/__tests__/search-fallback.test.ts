@@ -116,7 +116,7 @@ describe("keyless search fallbacks", () => {
           { title: "HN2", url: "https://news.ycombinator.com/item?id=2", description: "hn", engine: "hn-algolia", engineRank: 2 },
         ],
         [
-          { title: "B1", url: "https://example.com/firecrawl", description: "b", engine: "bing-rss", engineRank: 1 },
+          { title: "B1", url: "https://example.com/web-crawler", description: "b", engine: "bing-rss", engineRank: 1 },
         ],
       ],
       5
@@ -171,7 +171,7 @@ describe("keyless search fallbacks", () => {
             JSON.stringify({
               hits: [
                 { title: "Show HN: crawler", url: "https://github.com/example/crawler", objectID: "1", points: 10, num_comments: 2 },
-                { title: "Firecrawl alternative", url: "https://news.ycombinator.com/item?id=2", objectID: "2", points: 8, num_comments: 1 },
+                { title: "Open source web crawler", url: "https://news.ycombinator.com/item?id=2", objectID: "2", points: 8, num_comments: 1 },
               ],
             }),
             { status: 200 }

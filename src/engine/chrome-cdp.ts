@@ -1,10 +1,9 @@
 /**
  * Minimal Chrome DevTools Protocol client for local JS rendering.
  *
- * Inspired by Jina Reader's PuppeteerControl (page.goto + mutation-idle) and
- * Firecrawl's Playwright/CDP engines: drive a real Chrome over CDP instead of
- * `--dump-dom`, wait until the DOM is actually ready, and always bound the
- * session with a hard timeout. No puppeteer/playwright dependency.
+ * Drive a real Chrome over CDP instead of dump-dom, wait until the DOM is
+ * actually ready, and always bound the session with a hard timeout. No
+ * puppeteer/playwright dependency.
  */
 import { spawn, type ChildProcess } from "node:child_process";
 import { mkdtempSync, rmSync } from "node:fs";
@@ -46,7 +45,7 @@ const SNAPSHOT_JS = `(() => {
   };
 })()`;
 
-/** Jina-style mutationIdle (200ms quiet) + readyState complete, capped. */
+/** mutationIdle (200ms quiet) plus readyState complete, capped. */
 const WAIT_FOR_CONTENT_JS = `(async () => {
   const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   const snap = () => {
@@ -198,7 +197,7 @@ async function withCdpSession(
     try {
       await load;
     } catch {
-      /* take a snapshot anyway — Jina also keeps intermediate snapshots on goto timeout */
+      /* take a snapshot anyway if navigation load times out */
     }
     let snapshot = await evaluateSnapshot(client, WAIT_FOR_CONTENT_JS);
     if (!snapshot || snapshot.textLen < 40 || snapshot.html.length < 80) {

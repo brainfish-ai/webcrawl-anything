@@ -1,15 +1,15 @@
 /**
  * Local Chrome renderer (JS pages the native fetch ladder cannot hydrate).
  *
- * Primary driver is Chrome DevTools Protocol (Jina Reader / Firecrawl style):
+ * Primary driver is Chrome DevTools Protocol:
  * launch headless Chrome, navigate, wait until the DOM is content-ready
  * (load + 200ms mutation-idle), then read `documentElement.outerHTML`.
  *
- * `--dump-dom` is a last-resort fallback: Chrome 156 hangs on
- * `--headless=new --dump-dom` with a fresh profile, which used to look like a
- * successful scrape of the unrendered nav shell. Every attempt has a hard
- * timeout and a process-group kill. Playwright's chrome-headless-shell is
- * discovered automatically when present.
+ * dump-dom is a last-resort fallback: Chrome 156 hangs on dump-dom with a
+ * fresh profile, which used to look like a successful scrape of the
+ * unrendered nav shell. Every attempt has a hard timeout and a process-group
+ * kill. Playwright's chrome-headless-shell is discovered automatically when
+ * present.
  */
 import { spawn } from "node:child_process";
 import { mkdtempSync, rmSync } from "node:fs";

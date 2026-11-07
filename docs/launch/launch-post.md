@@ -53,7 +53,7 @@ Run on a laptop (darwin/arm64, Node 22) on 2026-11-03, `--mode local`, no API ke
 
 **47/50 runs succeeded. Median p50 was 568 ms.**
 
-The miss is real. Keyless local search relies on public search pages, and some queries come back empty when those engines throttle. If you need reliable search, add a Brave, Serper or Jina key, or use the hosted API. Reproduce it with:
+The miss is real. Keyless local search relies on public search pages, and some queries come back empty when those engines throttle. If you need reliable search, add a Brave or Serper key, or use the hosted API. Reproduce it with:
 
 ```bash
 git clone https://github.com/brainfish-ai/webcrawl-anything && cd webcrawl-anything

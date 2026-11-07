@@ -14,7 +14,7 @@
 | Timeout on large pages | retry once; if persistent, the site may rate-limit — slow down or add proxy |
 | `extract` returns generic `{app_name, product_features}` | Pass `--prompt` and/or `--schema`; extract follows those instead of the default product-feature shape. |
 | `extract` returns nothing | The prompt may target content not in the Markdown (JS-rendered). Scrape first, inspect the Markdown, adjust the prompt. |
-| Local `search` is empty or errors | Keyless HTML SERPs (DuckDuckGo/Brave) are often challenged. The engine falls back to Wikipedia, Hacker News, and Bing RSS; if those are empty too it returns `success: false` with a hint to set `BRAVE_SEARCH_API_KEY` / `SERPER_API_KEY` / `JINA_API_KEY`. |
+| Local `search` is empty or errors | Keyless HTML SERPs (DuckDuckGo/Brave) are often challenged. The engine falls back to Wikipedia, Hacker News, and Bing RSS; if those are empty too it returns `success: false` with a hint to set `BRAVE_SEARCH_API_KEY` or `SERPER_API_KEY`. |
 | `map` finds few URLs | Site may block sitemap.xml; try `--filter` with broader terms or crawl from the index page |
 
 ## Rate limiting & politeness

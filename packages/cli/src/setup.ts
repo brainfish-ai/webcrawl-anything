@@ -246,7 +246,7 @@ export function runDoctor(
   checks.push({
     name: "Document & Media parsers",
     status: "ok",
-    detail: "PDF (@firecrawl/pdf-inspector), Office (mammoth/officeparser), YouTube captions, NVD/OSV CVEs ready",
+    detail: "PDF inspector, Office (mammoth/officeparser), YouTube captions, NVD/OSV CVEs ready",
   });
 
   return { mode: effectiveMode, checks };

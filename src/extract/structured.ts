@@ -2,9 +2,8 @@
  * Prompt/schema-aware structured extraction used by `extractWebsiteData`.
  * Deterministic (no LLM): quote/author cards, embedded JSON, and schema shaping.
  *
- * Nested objects/arrays follow Firecrawl's JSON-schema walk (`normalizeSchema` /
- * `toRootSchema` in apps/api/src/scraper/scrapeURL/transformers/llmExtract.ts):
- * shorthand `{items:[{quote,author}]}` is coerced to a real object/array schema,
+ * Nested objects/arrays follow a JSON-schema walk: shorthand
+ * `{items:[{quote,author}]}` is coerced to a real object/array schema,
  * root arrays are wrapped as `{items: ...}`, and empty results are detectable.
  */
 import { decodeHtmlEntities } from "../engine/markdown.js";
@@ -20,7 +19,7 @@ function isPlainObject(v: unknown): v is Record<string, unknown> {
   return !!v && typeof v === "object" && !Array.isArray(v);
 }
 
-/** Firecrawl-style: a bare property map or shorthand array becomes a JSON Schema. */
+/** A bare property map or shorthand array becomes a JSON Schema. */
 export function coerceExtractSchema(node: unknown): Record<string, unknown> {
   if (Array.isArray(node)) {
     const item = node.length > 0 ? coerceExtractSchema(node[0]) : { type: "object" };
@@ -57,7 +56,7 @@ export function coerceExtractSchema(node: unknown): Record<string, unknown> {
 }
 
 /**
- * Like Firecrawl `toRootSchema` + root-array wrap: a top-level array becomes
+ * Root-array wrap: a top-level array becomes
  * `{ type: object, properties: { items: <array> } }`.
  */
 export function normalizeExtractSchema(

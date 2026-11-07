@@ -319,7 +319,7 @@ export async function fetchHedgedNativeFederation(
   });
 
   // Fallback: the free engines are scraped and can be blocked or rate limited. When they
-  // come back thin, fill in from Jina (paid) so the caller still gets an answer.
+  // come back thin, fill in from a keyed search provider so the caller still gets an answer.
   const uniqueUrls = new Set(collected.map((c) => c.url).filter(Boolean));
   if (uniqueUrls.size < JINA_FALLBACK_MIN_URLS && process.env.JINA_API_KEY) {
     const t0 = performance.now();
@@ -343,7 +343,7 @@ export async function fetchHedgedNativeFederation(
   return collected;
 }
 
-/** Below this many unique URLs from the free engines, the Jina fallback runs. */
+/** Below this many unique URLs from the free engines, the keyed search fallback runs. */
 export const JINA_FALLBACK_MIN_URLS = 3;
 
 /** True when a scraped SERP is a bot-check / captcha rather than results. */

@@ -75,7 +75,7 @@ describe("live smoke (network)", { skip: skipNetwork }, () => {
 
   it("keyless search fills n=5 from multiple sources", async () => {
     const local = createLocalEngineClient();
-    for (const query of ["open source web crawler", "firecrawl alternative"]) {
+    for (const query of ["open source web crawler", "web scraping api"]) {
       const res = await local.search({ query, limit: 5 });
       if (res.success === false) {
         assert.match(String(res.error), /no results/i);

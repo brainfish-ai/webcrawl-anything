@@ -82,7 +82,7 @@ export interface SearchRequest {
   bypassCache?: boolean;
   /**
    * Pick one search provider and skip the default multi-engine pipeline.
-   * `auto` (default) uses the free engines and falls back to Jina when results are thin.
+   * `auto` (default) uses the free engines and falls back to a keyed provider when results are thin.
    */
   provider?: SearchProviderChoice;
   rankOptions?: {
