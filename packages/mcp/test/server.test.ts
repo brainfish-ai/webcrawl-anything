@@ -1,9 +1,12 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
 import { describe, it } from "node:test";
+import { fileURLToPath } from "node:url";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { WebcrawlClient } from "@webcrawl/client";
-import { MAX_OUTPUT_CHARS, createServer } from "../src/index.js";
+import { LOCAL_ENGINE_LOAD_ERROR, MAX_OUTPUT_CHARS, createServer } from "../src/index.js";
 
 type Handler = (url: string, body: Record<string, unknown> | undefined) => { status?: number; json: unknown };
 
@@ -266,5 +269,13 @@ describe("webcrawl MCP server", () => {
 
     const deleted = await client.callTool({ name: "web_monitor", arguments: { action: "delete", id: "mon_42" } });
     assert.match(text(deleted), /Monitor deleted\./);
+  });
+
+  it("stdio binary never silently falls back to webcrawl.app", () => {
+    const bin = readFileSync(join(dirname(fileURLToPath(import.meta.url)), "../src/bin.ts"), "utf8");
+    assert.doesNotMatch(bin, /falling back to https:\/\/webcrawl\.app/);
+    assert.match(bin, /loadLocalEngineClient/);
+    assert.match(bin, /process\.exit\(1\)/);
+    assert.match(LOCAL_ENGINE_LOAD_ERROR, /Reinstall @webcrawl\/mcp/);
   });
 });

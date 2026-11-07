@@ -39,6 +39,7 @@ import { parseYouTubeCached, youtubeVideoId } from "./parse/youtube.js";
 import { rankDocuments, type RawCandidateDocument } from "./ranker.js";
 import { getSearchCategoriesCatalog, searchWeb } from "./search.js";
 import { inspectTarget, listTargets, resolveTarget } from "./targets.js";
+import { hasCustomExtractRequest } from "./extract/structured.js";
 
 export interface LocalEngineBackend {
   readonly baseUrl: string;
@@ -97,6 +98,32 @@ export function blockedScrapeResult(
 
 /** Shells shorter than this are unrendered JS / empty pages and must not be cached as content. */
 export const MIN_CACHEABLE_MARKDOWN = 200;
+
+/** Attach source HTML when the caller asked for the `html` format. */
+export function withOptionalHtml(
+  result: Record<string, unknown>,
+  html: string | undefined,
+  formats?: Array<"markdown" | "links" | "html">
+): Record<string, unknown> {
+  if (!formats?.includes("html") || !html) return result;
+  const data =
+    result.data && typeof result.data === "object" && !Array.isArray(result.data)
+      ? (result.data as Record<string, unknown>)
+      : {};
+  return { ...result, html, data: { ...data, html } };
+}
+
+/** Structured extract payload: custom prompt/schema → only those fields, no `target` sidecar. */
+export function extractOutputData(
+  extracted: Record<string, unknown>,
+  opts: { prompt?: string; schema?: Record<string, unknown>; target?: unknown }
+): Record<string, unknown> {
+  if (hasCustomExtractRequest(opts.prompt, opts.schema)) return extracted;
+  return {
+    ...extracted,
+    ...(opts.target ? { target: opts.target } : {}),
+  };
+}
 
 function nativeScrapeTier(): string {
   const t = lastFetchTier();
@@ -413,28 +440,32 @@ export function createLocalEngineClient(): LocalEngineBackend {
               contentHash: renderHash,
             });
           }
-          return {
-            success: true,
-            mode: "local",
-            url: targetUrl,
-            title: rendered.title || targetUrl,
-            markdown: rendered.markdown,
-            links: rendered.links,
-            data: {
+          return withOptionalHtml(
+            {
+              success: true,
+              mode: "local",
               url: targetUrl,
               title: rendered.title || targetUrl,
               markdown: rendered.markdown,
               links: rendered.links,
+              data: {
+                url: targetUrl,
+                title: rendered.title || targetUrl,
+                markdown: rendered.markdown,
+                links: rendered.links,
+              },
+              evidence: {
+                targetId: rendered.tier === "render" ? "render-provider" : "web-spa",
+                tier: rendered.tier,
+                contentHash: renderHash,
+                latencyMs: Date.now() - start,
+                sourceUrl: targetUrl,
+                matchedSignals: rendered.tier === "browser" ? ["render:local-chrome"] : [`render:${rendered.tier}`],
+              },
             },
-            evidence: {
-              targetId: rendered.tier === "render" ? "render-provider" : "web-spa",
-              tier: rendered.tier,
-              contentHash: renderHash,
-              latencyMs: Date.now() - start,
-              sourceUrl: targetUrl,
-              matchedSignals: rendered.tier === "browser" ? ["render:local-chrome"] : [`render:${rendered.tier}`],
-            },
-          };
+            rendered.html,
+            p.formats
+          );
         }
         if (blocked || !markdown.trim()) {
           return blockedScrapeResult(
@@ -450,35 +481,39 @@ export function createLocalEngineClient(): LocalEngineBackend {
           html,
           markdown,
         });
-        return {
-          success: true,
-          mode: "local",
-          url: targetUrl,
-          title: title || targetInspection.title || targetUrl,
-          markdown: targetInspection.markdown || markdown,
-          links,
-          data: {
+        return withOptionalHtml(
+          {
+            success: true,
+            mode: "local",
             url: targetUrl,
             title: title || targetInspection.title || targetUrl,
             markdown: targetInspection.markdown || markdown,
             links,
-            structured: targetInspection.structured,
+            data: {
+              url: targetUrl,
+              title: title || targetInspection.title || targetUrl,
+              markdown: targetInspection.markdown || markdown,
+              links,
+              structured: targetInspection.structured,
+            },
+            evidence: {
+              ...targetInspection.evidence,
+              tier: nativeTier,
+              contentHash: sha256(markdown || html),
+              latencyMs: Date.now() - start,
+              limitations: [
+                ...(Array.isArray(targetInspection.evidence?.limitations)
+                  ? (targetInspection.evidence.limitations as string[])
+                  : []),
+                "Page needs JS rendering; local Chrome was not available or produced no content. " +
+                  "Install Chrome (see `webcrawl doctor`), run `webcrawl login` and retry with `--mode cloud`, " +
+                  "or self-host a render provider via WEBCRAWL_RENDER_URL.",
+              ],
+            },
           },
-          evidence: {
-            ...targetInspection.evidence,
-            tier: nativeTier,
-            contentHash: sha256(markdown || html),
-            latencyMs: Date.now() - start,
-            limitations: [
-              ...(Array.isArray(targetInspection.evidence?.limitations)
-                ? (targetInspection.evidence.limitations as string[])
-                : []),
-              "Page needs JS rendering; local Chrome was not available or produced no content. " +
-                "Install Chrome (see `webcrawl doctor`), run `webcrawl login` and retry with `--mode cloud`, " +
-                "or self-host a render provider via WEBCRAWL_RENDER_URL.",
-            ],
-          },
-        };
+          html,
+          p.formats
+        );
       }
 
       if (blocked || !markdown.trim()) {
@@ -508,27 +543,31 @@ export function createLocalEngineClient(): LocalEngineBackend {
         markdown,
       });
 
-      return {
-        success: true,
-        mode: "local",
-        url: targetUrl,
-        title: title || targetInspection.title || targetUrl,
-        markdown: targetInspection.markdown || markdown,
-        links,
-        data: {
+      return withOptionalHtml(
+        {
+          success: true,
+          mode: "local",
           url: targetUrl,
           title: title || targetInspection.title || targetUrl,
           markdown: targetInspection.markdown || markdown,
           links,
-          structured: targetInspection.structured,
+          data: {
+            url: targetUrl,
+            title: title || targetInspection.title || targetUrl,
+            markdown: targetInspection.markdown || markdown,
+            links,
+            structured: targetInspection.structured,
+          },
+          evidence: {
+            ...targetInspection.evidence,
+            tier: nativeTier,
+            contentHash,
+            latencyMs: Date.now() - start,
+          },
         },
-        evidence: {
-          ...targetInspection.evidence,
-          tier: nativeTier,
-          contentHash,
-          latencyMs: Date.now() - start,
-        },
-      };
+        html,
+        p.formats
+      );
     },
 
     async parse(p: Record<string, unknown>): Promise<Record<string, unknown>> {
@@ -651,41 +690,36 @@ export function createLocalEngineClient(): LocalEngineBackend {
       schema?: Record<string, unknown>;
     }): Promise<Record<string, unknown>> {
       const targetUrl = /^https?:\/\//i.test(p.url) ? p.url : `https://${p.url}`;
-      const fetched = await fetchWithTlsImpersonation(targetUrl);
-      const fastCheck = fastHtmlToMarkdown(fetched.html, targetUrl);
-      let html = fetched.html;
-      let markdown = fastCheck.markdown;
-
-      //    JS shell: reuse scrape() so local Chrome / render provider / cache apply,
-      //    then extract from the rendered HTML + Markdown using the caller's prompt/schema.
-      if (needsBrowserEscalation(fetched.status, fetched.html, fastCheck.markdown)) {
-        const scraped = (await this.scrape({ url: targetUrl, noCache: true })) as {
-          success?: boolean;
-          blocked?: boolean;
-          error?: string;
-          markdown?: string;
-          title?: string;
-          data?: { structured?: Record<string, unknown>; markdown?: string; title?: string };
+      // Scrape first (local Chrome / render provider) so JS pages yield rendered HTML, not the shell.
+      const scraped = (await this.scrape({
+        url: targetUrl,
+        formats: ["markdown", "html"],
+        noCache: true,
+      })) as {
+        success?: boolean;
+        blocked?: boolean;
+        error?: string;
+        markdown?: string;
+        html?: string;
+        title?: string;
+        data?: { structured?: Record<string, unknown>; markdown?: string; title?: string; html?: string };
+      };
+      const markdown = (scraped.data && scraped.data.markdown) || scraped.markdown || "";
+      const html = (scraped.data && scraped.data.html) || scraped.html || "";
+      if (scraped.blocked || scraped.success === false) {
+        return {
+          success: false,
+          blocked: true,
+          mode: "local",
+          url: targetUrl,
+          data: {},
+          error: scraped.error || emptyPageError(200),
+          evidence: {
+            tier: lastFetchTier(),
+            sourceUrl: targetUrl,
+            limitations: [String(scraped.error || emptyPageError(200))],
+          },
         };
-        const renderedMarkdown =
-          (scraped.data && scraped.data.markdown) || scraped.markdown || "";
-        if (renderedMarkdown.trim().length > 40) {
-          markdown = renderedMarkdown;
-        } else if (scraped.blocked || scraped.success === false) {
-          return {
-            success: false,
-            blocked: true,
-            mode: "local",
-            url: targetUrl,
-            data: {},
-            error: scraped.error || emptyPageError(fetched.status),
-            evidence: {
-              tier: lastFetchTier(),
-              sourceUrl: targetUrl,
-              limitations: [String(scraped.error || emptyPageError(fetched.status))],
-            },
-          };
-        }
       }
 
       const targetInspection = await inspectTarget({
@@ -705,10 +739,11 @@ export function createLocalEngineClient(): LocalEngineBackend {
         success: true,
         mode: "local",
         url: targetUrl,
-        data: {
-          ...extracted,
-          ...(targetInspection.structured ? { target: targetInspection.structured } : {}),
-        },
+        data: extractOutputData(extracted, {
+          prompt: p.prompt,
+          schema: p.schema,
+          target: targetInspection.structured,
+        }),
         evidence: targetInspection.evidence,
       };
     },

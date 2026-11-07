@@ -32,7 +32,7 @@ Add to `.cursor/mcp.json`, `~/.claude.json`, or your MCP client config:
 
 ### Optional: webcrawl.app cloud
 
-Local mode is the default and needs nothing else. To run the same tools on the hosted service, either:
+Local mode is the default and needs nothing else. The packaged server loads the local engine from `dist/core`; if that import fails it exits with an error instead of silently calling webcrawl.app. To run the same tools on the hosted service, either:
 
 - add `"WEBCRAWL_API_KEY": "wc_live_..."` to `env` above (get a key at [webcrawl.app](https://webcrawl.app)), or
 - connect your client to the hosted endpoint `https://webcrawl.app/mcp` and sign in in the browser. No local install is needed.

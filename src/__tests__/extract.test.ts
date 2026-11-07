@@ -7,6 +7,7 @@ import {
   hasCustomExtractRequest,
   wantsQuoteAuthorExtract,
 } from "../extract/structured.js";
+import { extractOutputData, withOptionalHtml } from "../local-engine.js";
 
 const QUOTES_JS_HTML = `<!DOCTYPE html><html><head><title>Quotes to Scrape</title></head><body>
 <h1>Quotes to Scrape</h1>
@@ -106,5 +107,39 @@ describe("prompt/schema extract", () => {
     });
     assert.equal(typeof out.app_name, "string");
     assert.ok(Array.isArray(out.product_features));
+  });
+
+  it("omits the target sidecar when the caller passed a prompt or schema", () => {
+    const extracted = { quotes: [{ quote: "q", author: "a" }] };
+    const custom = extractOutputData(extracted, {
+      prompt: "quotes and authors",
+      schema: QUOTES_SCHEMA,
+      target: { kind: "generic-web" },
+    });
+    assert.deepEqual(custom, extracted);
+    assert.equal("target" in custom, false);
+
+    const generic = extractOutputData(
+      { app_name: "X", product_features: ["a"] },
+      { target: { kind: "generic-web" } }
+    );
+    assert.equal((generic.target as { kind: string }).kind, "generic-web");
+  });
+
+  it("attaches rendered HTML on scrape results when formats includes html", () => {
+    const rendered = "<html><body><div class='quote'>Einstein</div></body></html>";
+    const withHtml = withOptionalHtml(
+      { success: true, markdown: "Einstein", data: { markdown: "Einstein" } },
+      rendered,
+      ["markdown", "html"]
+    );
+    assert.equal(withHtml.html, rendered);
+    assert.equal((withHtml.data as { html: string }).html, rendered);
+    const without = withOptionalHtml(
+      { success: true, markdown: "Einstein", data: { markdown: "Einstein" } },
+      rendered,
+      ["markdown"]
+    );
+    assert.equal("html" in without, false);
   });
 });
