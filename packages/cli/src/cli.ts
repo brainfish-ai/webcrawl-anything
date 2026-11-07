@@ -563,8 +563,16 @@ export async function main(argv: string[], io: Io, deps: Deps = {}): Promise<num
           }
         }
         const res = await client.extract({ url: need("url"), prompt: v.prompt, schema });
+        if (res.success === false && !v.json) {
+          const msg =
+            typeof res.error === "string" && res.error.trim()
+              ? res.error
+              : JSON.stringify(res.data ?? res, null, 2);
+          io.err(`${msg}\n`);
+          return 1;
+        }
         emit(res, JSON.stringify(res.data ?? res, null, 2));
-        return 0;
+        return res.success === false ? 1 : 0;
       }
       case "rerank": {
         const query = need("query");

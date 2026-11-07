@@ -170,7 +170,7 @@ export interface CategoryDefinition {
 export const SEARCH_CATEGORY_CATALOG: Record<string, CategoryDefinition> = {
   general: {
     description: "Broad web search across general-purpose engines.",
-    engines: ["brave-native", "ddg-lite", "wikipedia"],
+    engines: ["brave-native", "ddg-lite", "wikipedia", "hn-algolia", "bing-rss"],
     localizeBy: "none",
     preferLocalDomains: false,
     subcategories: {

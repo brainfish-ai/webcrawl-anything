@@ -102,6 +102,15 @@ describe("webcrawl CLI", () => {
     assert.match(t.out(), /"name": "x"/);
   });
 
+  it("failed extract prints the error and exits 1", async () => {
+    const t = setup(() => ({
+      json: { success: false, error: "Extraction produced no data matching the prompt/schema.", data: {} },
+    }));
+    assert.equal(await t.run(["extract", "https://a.com", "--prompt", "quotes"]), 1);
+    assert.equal(t.out(), "");
+    assert.match(t.err(), /Extraction produced no data matching the prompt\/schema/);
+  });
+
   it("login saves the key at 0600 and later commands use it", async () => {
     const t = setup();
     assert.equal(await t.run(["login", "--key", "wc_live_saved"], {}), 0);

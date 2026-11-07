@@ -1,63 +1,81 @@
 /**
- * Local Chrome dump-dom renderer (JS pages the native fetch ladder cannot hydrate).
+ * Local Chrome renderer (JS pages the native fetch ladder cannot hydrate).
  *
- * Uses a user-installed Chrome/Chromium binary — the same one `webcrawl doctor`
- * reports — with `--dump-dom` + virtual time so `document.write` / client-rendered
- * content appears in the HTML. Playwright is not required; this is the zero-key
- * local JS tier.
+ * Primary driver is Chrome DevTools Protocol (Jina Reader / Firecrawl style):
+ * launch headless Chrome, navigate, wait until the DOM is content-ready
+ * (load + 200ms mutation-idle), then read `documentElement.outerHTML`.
+ *
+ * `--dump-dom` is a last-resort fallback: Chrome 156 hangs on
+ * `--headless=new --dump-dom` with a fresh profile, which used to look like a
+ * successful scrape of the unrendered nav shell. Every attempt has a hard
+ * timeout and a process-group kill. Playwright's chrome-headless-shell is
+ * discovered automatically when present.
  */
 import { spawn } from "node:child_process";
-import { existsSync, mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { renderUrlViaCdp } from "./chrome-cdp.js";
+import {
+  DEFAULT_TIMEOUT_MS,
+  DUMP_MAX_BYTES,
+  chromeDumpDomArgs,
+  discoverChromeBinaries,
+  installedChromePath,
+  isLocalChromeAvailable,
+  killProcessGroup,
+  type ChromeHeadlessMode,
+} from "./chrome-launch.js";
 
-const DUMP_MAX_BYTES = 2 * 1024 * 1024;
-const DEFAULT_TIMEOUT_MS = 20_000;
-const VIRTUAL_TIME_MS = 10_000;
+export {
+  DEFAULT_TIMEOUT_MS,
+  VIRTUAL_TIME_MS,
+  discoverChromeBinaries,
+  findPlaywrightHeadlessShell,
+  installedChromePath,
+  isLocalChromeAvailable,
+  parseDevToolsActivePort,
+  chromeCdpArgs,
+  chromeDumpDomArgs,
+  killProcessGroup,
+  type ChromeHeadlessMode,
+} from "./chrome-launch.js";
 
-/**
- * Path to a real installed Chrome/Chromium, or null.
- * Priority: WEBCRAWL_CHROME_PATH, INTERACT_CHROME_PATH, CHROME_PATH, then per-OS
- * defaults (same locations `webcrawl doctor` checks).
- */
-export function installedChromePath(): string | null {
-  const fromEnv =
-    process.env.WEBCRAWL_CHROME_PATH?.trim() ||
-    process.env.INTERACT_CHROME_PATH?.trim() ||
-    process.env.CHROME_PATH?.trim();
-  if (fromEnv) return fromEnv;
-  const candidates: string[] = [];
-  if (process.platform === "darwin") {
-    candidates.push(
-      "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
-      `${process.env.HOME || ""}/Applications/Google Chrome.app/Contents/MacOS/Google Chrome`
-    );
-  } else if (process.platform === "win32") {
-    candidates.push(
-      `${process.env["ProgramFiles"] || "C:\\Program Files"}\\Google\\Chrome\\Application\\chrome.exe`,
-      `${process.env["ProgramFiles(x86)"] || "C:\\Program Files (x86)"}\\Google\\Chrome\\Application\\chrome.exe`
-    );
-  } else {
-    candidates.push(
-      "/usr/bin/google-chrome",
-      "/usr/bin/google-chrome-stable",
-      "/usr/bin/chromium-browser",
-      "/usr/bin/chromium",
-      "/snap/bin/chromium"
-    );
-  }
-  for (const p of candidates) {
-    try {
-      if (p && existsSync(p)) return p;
-    } catch {
-      /* not installed here */
-    }
-  }
-  return null;
+export interface ChromeRenderAttempt {
+  ok: boolean;
+  method: string;
+  ms: number;
+  error?: string;
 }
 
-export function isLocalChromeAvailable(): boolean {
-  return installedChromePath() !== null;
+export interface ChromeRenderResult {
+  html: string | null;
+  method?: string;
+  error?: string;
+  attempts: ChromeRenderAttempt[];
+}
+
+type AttemptKind = { driver: "cdp" | "dump-dom"; headless: ChromeHeadlessMode };
+
+function attemptPlan(binary: string): AttemptKind[] {
+  const isShell = /headless[-_]?shell/i.test(binary);
+  if (isShell) {
+    return [
+      { driver: "cdp", headless: "shell" },
+      { driver: "dump-dom", headless: "shell" },
+    ];
+  }
+  return [
+    { driver: "cdp", headless: "new" },
+    { driver: "cdp", headless: "old" },
+    { driver: "dump-dom", headless: "old" },
+    { driver: "dump-dom", headless: "new" },
+  ];
+}
+
+function methodName(binary: string, kind: AttemptKind): string {
+  const base = binary.split(/[/\\]/).pop() || binary;
+  return `${kind.driver}/${kind.headless} (${base})`;
 }
 
 /**
@@ -68,73 +86,159 @@ export async function renderViaLocalChrome(
   url: string,
   opts: { timeoutMs?: number } = {}
 ): Promise<string | null> {
-  const chrome = installedChromePath();
-  if (!chrome) return null;
-  const timeoutMs = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+  const result = await renderViaLocalChromeDetailed(url, opts);
+  return result.html;
+}
+
+/**
+ * Same as `renderViaLocalChrome` but with the attempt log and an actionable
+ * error when every driver fails. Callers that need to report honest JS-render
+ * failures should use this.
+ */
+export async function renderViaLocalChromeDetailed(
+  url: string,
+  opts: { timeoutMs?: number } = {}
+): Promise<ChromeRenderResult> {
+  const binaries = discoverChromeBinaries();
+  if (binaries.length === 0) {
+    return {
+      html: null,
+      error:
+        "No local Chrome/Chromium binary found. Install Chrome, set WEBCRAWL_CHROME_PATH, " +
+        "or run `npx playwright install chromium-headless-shell`. See `webcrawl doctor`.",
+      attempts: [],
+    };
+  }
+  const budgetMs = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+  const started = Date.now();
+  const attempts: ChromeRenderAttempt[] = [];
+  let lastError = "local Chrome produced no content";
+
+  for (const binary of binaries) {
+    for (const kind of attemptPlan(binary)) {
+      const remaining = budgetMs - (Date.now() - started);
+      if (remaining < 1_200) break;
+      const method = methodName(binary, kind);
+      const attemptBudget =
+        kind.driver === "cdp"
+          ? Math.min(remaining, kind.headless === "new" ? 12_000 : 8_000)
+          : Math.min(remaining, 6_000);
+      const t0 = Date.now();
+      try {
+        const html =
+          kind.driver === "cdp"
+            ? (await renderUrlViaCdp(binary, url, {
+                timeoutMs: attemptBudget,
+                headless: kind.headless,
+              })).html
+            : await dumpDom(binary, url, kind.headless, attemptBudget);
+        const ms = Date.now() - t0;
+        if (html && html.length > 100) {
+          attempts.push({ ok: true, method, ms });
+          return { html, method, attempts };
+        }
+        lastError = `${method} returned empty HTML`;
+        attempts.push({ ok: false, method, ms, error: lastError });
+      } catch (err) {
+        const ms = Date.now() - t0;
+        lastError = `${method}: ${err instanceof Error ? err.message : String(err)}`;
+        attempts.push({ ok: false, method, ms, error: lastError });
+      }
+    }
+  }
+
+  return {
+    html: null,
+    error:
+      `JavaScript rendering failed (${lastError}). ` +
+      "Chrome hung, timed out, or produced no content. Install Chrome, point WEBCRAWL_CHROME_PATH " +
+      "at chrome-headless-shell (`npx playwright install chromium-headless-shell`), " +
+      "run `webcrawl login` and retry with `--mode cloud`, or set WEBCRAWL_RENDER_URL.",
+    attempts,
+  };
+}
+
+async function dumpDom(
+  chrome: string,
+  url: string,
+  headless: ChromeHeadlessMode,
+  timeoutMs: number
+): Promise<string> {
   let profile = "";
   try {
     profile = mkdtempSync(join(tmpdir(), "wc-chrome-"));
   } catch {
-    return null;
+    throw new Error("could not create Chrome profile directory");
   }
-  const args = [
-    "--headless=new",
-    "--no-sandbox",
-    "--disable-gpu",
-    "--disable-dev-shm-usage",
-    "--no-first-run",
-    "--no-default-browser-check",
-    "--disable-crash-reporter",
-    "--disable-breakpad",
-    `--user-data-dir=${profile}`,
-    `--virtual-time-budget=${VIRTUAL_TIME_MS}`,
-    `--timeout=${timeoutMs}`,
-    "--dump-dom",
+  const args = chromeDumpDomArgs({
+    profile,
+    headless,
     url,
-  ];
+    timeoutMs,
+    binaryPath: chrome,
+  });
   try {
-    return await new Promise<string | null>((resolve) => {
+    return await new Promise<string>((resolve, reject) => {
       let settled = false;
-      const done = (value: string | null) => {
+      const done = (err: Error | null, value?: string) => {
         if (settled) return;
         settled = true;
-        resolve(value);
+        if (err) reject(err);
+        else resolve(value ?? "");
       };
       let child: ReturnType<typeof spawn>;
       try {
-        child = spawn(chrome, args, { stdio: ["ignore", "pipe", "pipe"] });
-      } catch {
-        done(null);
+        child = spawn(chrome, args, {
+          stdio: ["ignore", "pipe", "pipe"],
+          detached: true,
+        });
+      } catch (err) {
+        done(err instanceof Error ? err : new Error(String(err)));
         return;
       }
       const chunks: Buffer[] = [];
       let bytes = 0;
-      const timer = setTimeout(() => {
-        try {
-          child.kill("SIGKILL");
-        } catch {
-          /* already gone */
+      let idle: ReturnType<typeof setTimeout> | null = null;
+      const finish = (err: Error | null) => {
+        clearTimeout(timer);
+        if (idle) clearTimeout(idle);
+        killProcessGroup(child.pid, child);
+        if (err) {
+          done(err);
+          return;
         }
-        done(null);
-      }, timeoutMs + 2_000);
+        const text = Buffer.concat(chunks).toString("utf8");
+        done(null, text.trim());
+      };
+      const timer = setTimeout(() => {
+        if (bytes > 100) finish(null);
+        else finish(new Error(`dump-dom timed out after ${timeoutMs}ms`));
+      }, timeoutMs);
       child.stdout?.on("data", (c: Buffer) => {
         if (bytes >= DUMP_MAX_BYTES) return;
         const take = c.subarray(0, DUMP_MAX_BYTES - bytes);
         chunks.push(take);
         bytes += take.length;
+        // Chrome 156 often prints the DOM then never exits (`--dump-dom` hang).
+        if (idle) clearTimeout(idle);
+        idle = setTimeout(() => {
+          if (bytes > 40) finish(null);
+        }, 400);
       });
-      child.on("error", () => {
+      child.on("error", (err) => {
         clearTimeout(timer);
-        done(null);
+        if (idle) clearTimeout(idle);
+        done(err);
       });
       child.on("close", () => {
         clearTimeout(timer);
+        if (idle) clearTimeout(idle);
         if (bytes === 0) {
-          done(null);
+          done(new Error("dump-dom produced no stdout"));
           return;
         }
         const text = Buffer.concat(chunks).toString("utf8");
-        done(text.trim().length > 0 ? text : null);
+        done(null, text.trim().length > 0 ? text : "");
       });
     });
   } finally {

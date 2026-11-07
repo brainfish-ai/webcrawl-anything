@@ -214,7 +214,9 @@ export async function searchWeb(req: SearchRequest): Promise<SearchResponse> {
   }
 
   const perEngineLimit = Math.min(Math.max(limit + 4, 8), 15);
-  const quorumTimeoutMs = req.rankOptions?.quorumTimeoutMs ?? 1500;
+  // Must outlast DDG/Brave impersonation (2200ms) so a slow SERP is not cut off
+  // after Wikipedia's 2 hits — the v1.4.3 keyless-search failure mode.
+  const quorumTimeoutMs = req.rankOptions?.quorumTimeoutMs ?? 2800;
 
   // Stage 1: Hedged Multi-Engine Native Federation
   const collectedOffers: ProductOffer[] = [];

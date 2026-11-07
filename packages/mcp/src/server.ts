@@ -258,6 +258,9 @@ export function createWebcrawlMcpServer(
     ({ url, prompt, schema }) =>
       run(async () => {
         const res = await client.extract({ url, prompt, schema });
+        if (res.success === false && typeof res.error === "string") {
+          throw new Error(res.error + formatCredits(res));
+        }
         return JSON.stringify(res.data ?? res, null, 2) + formatCredits(res);
       })
   );

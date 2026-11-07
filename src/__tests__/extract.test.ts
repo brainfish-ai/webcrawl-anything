@@ -5,6 +5,10 @@ import {
   extractByPromptAndSchema,
   extractQuoteAuthorPairs,
   hasCustomExtractRequest,
+  isEmptyExtractResult,
+  isJsTemplateJunk,
+  normalizeExtractSchema,
+  stripNonContentHtml,
   wantsQuoteAuthorExtract,
 } from "../extract/structured.js";
 import { extractOutputData, withOptionalHtml } from "../local-engine.js";
@@ -100,6 +104,24 @@ describe("prompt/schema extract", () => {
     assert.equal(out.product_features, undefined);
   });
 
+  it("extractWebsiteData fills nested {items:[{quote,author}]} and ignores script junk", async () => {
+    const nested = { items: [{ quote: "string", author: "string" }] };
+    const out = await extractWebsiteData("https://quotes.toscrape.com/js/", {
+      schema: nested,
+      html: QUOTES_JS_HTML,
+      markdown: "# Quotes to Scrape\n\nLogin",
+      bypassCache: true,
+    });
+    const items = out.items as Array<{ quote: string; author: string }>;
+    assert.ok(Array.isArray(items) && items.length >= 2, JSON.stringify(out));
+    assert.ok(items.some((q) => q.author === "Albert Einstein"));
+    assert.equal(
+      items.some((q) => /\+\s*d\[/.test(q.quote) || /\+\s*d\[/.test(q.author)),
+      false,
+      JSON.stringify(items)
+    );
+  });
+
   it("keeps the default app_name shape when no prompt or schema is given", async () => {
     const out = await extractWebsiteData("https://example.com/docs", {
       markdown: "# Docs\n\n## Fast crawl\n\n## Local search\n",
@@ -124,6 +146,50 @@ describe("prompt/schema extract", () => {
       { target: { kind: "generic-web" } }
     );
     assert.equal((generic.target as { kind: string }).kind, "generic-web");
+  });
+
+  it("normalizes shorthand nested schemas like {items:[{quote,author}]}", () => {
+    const nested = { items: [{ quote: "string", author: "string" }] };
+    const normalized = normalizeExtractSchema(nested);
+    assert.equal(normalized?.type, "object");
+    const items = (normalized?.properties as { items: { type: string } }).items;
+    assert.equal(items.type, "array");
+    assert.equal(wantsQuoteAuthorExtract(undefined, nested), true);
+    const shaped = extractByPromptAndSchema(QUOTES_STATIC_HTML, "", undefined, nested);
+    assert.ok(shaped);
+    const rows = shaped.items as Array<{ quote: string; author: string }>;
+    assert.ok(Array.isArray(rows) && rows.length >= 2);
+    assert.equal(rows[0].author, "Albert Einstein");
+    assert.match(rows[0].quote, /world as we have created it/);
+  });
+
+  it("does not treat empty nested extract as a filled result", () => {
+    assert.equal(isEmptyExtractResult({}), true);
+    assert.equal(isEmptyExtractResult({ cached: false, cacheLayer: "miss" }), true);
+    assert.equal(isEmptyExtractResult({ items: [] }), true);
+    assert.equal(isEmptyExtractResult({ items: [{ quote: "q", author: "a" }] }), false);
+    const empty = extractByPromptAndSchema(
+      "<html><body><p>No quotes here.</p></body></html>",
+      "No quotes here.",
+      undefined,
+      { items: [{ quote: "string", author: "string" }] }
+    );
+    assert.equal(empty, null);
+  });
+
+  it("strips script/style and ignores document.write template junk", () => {
+    assert.equal(isJsTemplateJunk("+ d['text'] +"), true);
+    assert.equal(isJsTemplateJunk("The world as we have created it is a process of our thinking."), false);
+    const stripped = stripNonContentHtml(QUOTES_JS_HTML);
+    assert.doesNotMatch(stripped, /document\.write/);
+    assert.doesNotMatch(stripped, /d\['text'\]/);
+    const pairs = extractQuoteAuthorPairs(QUOTES_JS_HTML, "");
+    assert.ok(pairs.length >= 2);
+    assert.equal(
+      pairs.some((p) => isJsTemplateJunk(p.text) || isJsTemplateJunk(p.author)),
+      false
+    );
+    assert.ok(pairs.every((p) => !/\+\s*d\[/.test(p.text)));
   });
 
   it("attaches rendered HTML on scrape results when formats includes html", () => {

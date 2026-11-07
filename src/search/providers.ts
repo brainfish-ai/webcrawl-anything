@@ -174,11 +174,15 @@ export async function fetchHedgedNativeFederation(
     },
     wikipedia: {
       primary: false,
-      run: () => fetchWikipediaOpenSearch(localizedQuery, 2),
+      run: () => fetchWikipediaOpenSearch(localizedQuery, Math.min(perEngineLimit, 5)),
     },
     "hn-algolia": {
       primary: false,
-      run: () => fetchHackerNewsAlgolia(localizedQuery, 5),
+      run: () => fetchHackerNewsAlgolia(localizedQuery, perEngineLimit),
+    },
+    "bing-rss": {
+      primary: false,
+      run: () => fetchBingWebRss(localizedQuery, perEngineLimit),
     },
     arxiv: {
       primary: category === "academic",
@@ -258,7 +262,10 @@ export async function fetchHedgedNativeFederation(
         resolve();
         return;
       }
-      // Early-exit quorum: at least 1 primary web engine + 2 total engines + enough candidates (and shopping engine finished when in shopping plan)
+      const uniqueCount = new Set(collected.map((c) => canonicalSearchUrl(c.url)).filter(Boolean)).size;
+      const fillTarget = Math.max(1, req.limit ?? 5);
+      // Early-exit quorum: at least 1 primary web engine + 2 total engines + enough
+      // *unique* URLs to fill `limit` (not just Wikipedia's 2 hits).
       if (
         completedShoppingEngine &&
         completedNewsEngine &&
@@ -266,7 +273,7 @@ export async function fetchHedgedNativeFederation(
         completedArxivEngine &&
         completedPrimaryEngines >= 1 &&
         totalCompletedEngines >= 2 &&
-        collected.length >= perEngineLimit &&
+        uniqueCount >= fillTarget &&
         !graceTimer
       ) {
         graceTimer = setTimeout(() => {
@@ -324,9 +331,12 @@ export async function fetchHedgedNativeFederation(
   }
 
   // HTML SERPs (DDG, Brave) are frequently challenge/429 pages. When they
-  // yield nothing, fall back to keyless APIs that still work without a key.
-  if (collected.length === 0 && (!req.provider || req.provider === "auto")) {
-    const extras = await fetchKeylessSearchFallbacks(localizedQuery, perEngineLimit);
+  // yield nothing *or come back thinner than `limit`*, fill from keyless APIs
+  // (Wikipedia, HN Algolia, Bing RSS, DDG Instant Answer) with retry/backoff.
+  const fillTarget = Math.max(1, req.limit ?? 5);
+  const uniqueAfter = new Set(collected.map((c) => canonicalSearchUrl(c.url)).filter(Boolean));
+  if (uniqueAfter.size < fillTarget && (!req.provider || req.provider === "auto")) {
+    const extras = await fetchKeylessSearchFallbacks(localizedQuery, Math.max(fillTarget, perEngineLimit));
     collected.push(...extras);
   }
 
@@ -352,8 +362,68 @@ export function isSerpChallengeHtml(html: string, status = 200): boolean {
 
 export const EMPTY_SEARCH_ERROR =
   "Keyless search engines returned no results (DuckDuckGo and Brave often serve a bot challenge). " +
-  "Tried Wikipedia, Hacker News, and Bing RSS as well. " +
+  "Tried Wikipedia, Hacker News, Bing RSS, and DuckDuckGo Instant Answer as well. " +
   "Set BRAVE_SEARCH_API_KEY, SERPER_API_KEY, or JINA_API_KEY, or retry later.";
+
+/** Canonical URL for search dedupe (host lowercased, trailing slash / tracking params stripped). */
+export function canonicalSearchUrl(raw: string | undefined): string {
+  if (!raw) return "";
+  try {
+    const u = new URL(raw);
+    u.hash = "";
+    u.hostname = u.hostname.toLowerCase();
+    for (const key of [...u.searchParams.keys()]) {
+      if (/^(utm_|ref|fbclid|gclid|mc_)/i.test(key)) u.searchParams.delete(key);
+    }
+    let path = u.pathname.replace(/\/+$/, "") || "/";
+    u.pathname = path;
+    return u.toString();
+  } catch {
+    return raw.replace(/\/+$/, "").toLowerCase();
+  }
+}
+
+/** Round-robin merge so one source (e.g. Wikipedia) cannot fill `-n` by itself. */
+export function mergeSearchCandidates(
+  groups: RawCandidateDocument[][],
+  limit: number
+): RawCandidateDocument[] {
+  const seen = new Set<string>();
+  const out: RawCandidateDocument[] = [];
+  const queues = groups.map((g) => [...g]);
+  let progressed = true;
+  while (out.length < limit && progressed) {
+    progressed = false;
+    for (const q of queues) {
+      while (q.length > 0) {
+        const item = q.shift()!;
+        const key = canonicalSearchUrl(item.url);
+        if (!key || seen.has(key)) continue;
+        seen.add(key);
+        out.push(item);
+        progressed = true;
+        break;
+      }
+      if (out.length >= limit) break;
+    }
+  }
+  return out;
+}
+
+export async function withRetry<T>(
+  fn: () => Promise<T>,
+  opts: { retries?: number; delayMs?: number; isEmpty?: (v: T) => boolean } = {}
+): Promise<T> {
+  const retries = opts.retries ?? 1;
+  const delayMs = opts.delayMs ?? 250;
+  const isEmpty = opts.isEmpty ?? ((v: T) => (Array.isArray(v) ? v.length === 0 : !v));
+  let last = await fn();
+  for (let i = 0; i < retries && isEmpty(last); i++) {
+    await new Promise((r) => setTimeout(r, delayMs * (i + 1)));
+    last = await fn();
+  }
+  return last;
+}
 
 /** Parse Bing's `format=rss` web-search feed into candidate docs. */
 export function parseBingWebRss(xml: string, limit: number): RawCandidateDocument[] {
@@ -409,28 +479,92 @@ async function fetchBingWebRss(query: string, limit: number): Promise<RawCandida
 }
 
 /**
- * Last-resort keyless engines used when DDG/Brave HTML SERPs come back empty.
- * Wikipedia OpenSearch, HN Algolia, and Bing RSS do not require a JS challenge.
+ * Last-resort keyless engines used when DDG/Brave HTML SERPs come back empty
+ * or thinner than `limit`. Wikipedia OpenSearch, HN Algolia, Bing RSS, and
+ * DuckDuckGo Instant Answer do not require a JS challenge or API key.
  */
 export async function fetchKeylessSearchFallbacks(
   query: string,
   limit: number
 ): Promise<RawCandidateDocument[]> {
   const per = Math.max(limit, 5);
-  const [hn, wiki, bing] = await Promise.all([
-    fetchHackerNewsAlgolia(query, per),
-    fetchWikipediaOpenSearch(query, per),
-    fetchBingWebRss(query, per),
-  ]);
-  const seen = new Set<string>();
-  const out: RawCandidateDocument[] = [];
-  for (const item of [...hn, ...wiki, ...bing]) {
-    if (!item.url || seen.has(item.url)) continue;
-    seen.add(item.url);
-    out.push(item);
-    if (out.length >= Math.max(limit + 4, 8)) break;
+  const empty = (v: RawCandidateDocument[]) => v.length === 0;
+  const run = () =>
+    Promise.all([
+      withRetry(() => fetchHackerNewsAlgolia(query, per), { retries: 1, delayMs: 280, isEmpty: empty }),
+      withRetry(() => fetchWikipediaOpenSearch(query, per), { retries: 1, delayMs: 280, isEmpty: empty }),
+      withRetry(() => fetchBingWebRss(query, per), { retries: 1, delayMs: 280, isEmpty: empty }),
+      withRetry(() => fetchDuckDuckGoInstantAnswer(query, per), { retries: 1, delayMs: 280, isEmpty: empty }),
+    ]);
+  let groups = await run();
+  if (groups.every((g) => g.length === 0)) {
+    await new Promise((r) => setTimeout(r, 400));
+    groups = await run();
   }
-  return out;
+  return mergeSearchCandidates(groups, Math.max(limit, 8));
+}
+
+/** DuckDuckGo Instant Answer API — keyless JSON, unrelated to the HTML SERP challenge. */
+export async function fetchDuckDuckGoInstantAnswer(
+  query: string,
+  limit: number
+): Promise<RawCandidateDocument[]> {
+  try {
+    const url = `https://api.duckduckgo.com/?q=${encodeURIComponent(query)}&format=json&no_redirect=1&no_html=1&skip_disambig=1`;
+    const res = await fetch(url, {
+      headers: {
+        Accept: "application/json",
+        "User-Agent": "WebCrawl/1.4 (https://webcrawl.app; search@webcrawl.app)",
+      },
+      signal: AbortSignal.timeout(2500),
+    });
+    if (!res.ok) return [];
+    const json = (await res.json()) as {
+      Heading?: string;
+      AbstractURL?: string;
+      AbstractText?: string;
+      AbstractSource?: string;
+      Results?: Array<{ FirstURL?: string; Text?: string }>;
+      RelatedTopics?: unknown;
+    };
+    const items: RawCandidateDocument[] = [];
+    const push = (title: string, href: string, description: string) => {
+      if (!href.startsWith("http") || items.length >= limit) return;
+      if (items.some((i) => canonicalSearchUrl(i.url) === canonicalSearchUrl(href))) return;
+      items.push({
+        title: title || href,
+        url: href,
+        description: description || title,
+        engine: "ddg-lite",
+        engineRank: items.length + 1,
+      });
+    };
+    if (json.AbstractURL && (json.Heading || json.AbstractText)) {
+      push(
+        json.Heading || json.AbstractSource || json.AbstractURL,
+        json.AbstractURL,
+        json.AbstractText || ""
+      );
+    }
+    for (const row of json.Results ?? []) {
+      if (row.FirstURL && row.Text) push(row.Text, row.FirstURL, row.Text);
+    }
+    const walk = (node: unknown) => {
+      if (items.length >= limit) return;
+      if (Array.isArray(node)) {
+        for (const n of node) walk(n);
+        return;
+      }
+      if (!node || typeof node !== "object") return;
+      const rec = node as { FirstURL?: string; Text?: string; Topics?: unknown };
+      if (rec.FirstURL && rec.Text) push(rec.Text, rec.FirstURL, rec.Text);
+      if (rec.Topics) walk(rec.Topics);
+    };
+    walk(json.RelatedTopics);
+    return items;
+  } catch {
+    return [];
+  }
 }
 
 export async function fetchJinaSearch(
@@ -848,29 +982,39 @@ async function fetchDuckDuckGoLiteOnly(
     const countryCode = (userLocation?.country || "").toUpperCase();
     const kl = ddgRegion(countryCode, undefined);
     const klParam = kl ? `&kl=${encodeURIComponent(kl)}` : "";
-    const liteRes = await fetchWithTlsImpersonation(
+    const endpoints = [
       `https://lite.duckduckgo.com/lite/?q=${encodeURIComponent(query)}${klParam}`,
-      2200
-    );
-    if (liteRes && liteRes.html && !isSerpChallengeHtml(liteRes.html, liteRes.status)) {
-      const html = liteRes.html;
-      const linkMatches = Array.from(
-        html.matchAll(
-          /<a\s+[^>]*href=["']([^"']+)["'][^>]*class=["']result-link["'][^>]*>([\s\S]*?)<\/a>|<a\s+[^>]*class=["']result-link["'][^>]*href=["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi
-        )
-      );
-      const snippetMatches = Array.from(
-        html.matchAll(
-          /<td\s+[^>]*class=["']result-snippet["'][^>]*>([\s\S]*?)<\/td>/gi
-        )
-      );
+      `https://html.duckduckgo.com/html/?q=${encodeURIComponent(query)}${klParam}`,
+    ];
+    for (const endpoint of endpoints) {
+      if (items.length >= limit) break;
+      try {
+        const liteRes = await fetchWithTlsImpersonation(endpoint, 2200);
+        if (!liteRes?.html || isSerpChallengeHtml(liteRes.html, liteRes.status)) {
+          continue;
+        }
+        const html = liteRes.html;
+        const linkMatches = Array.from(
+          html.matchAll(
+            /<a\s+[^>]*href=["']([^"']+)["'][^>]*class=["']result-link["'][^>]*>([\s\S]*?)<\/a>|<a\s+[^>]*class=["']result-link["'][^>]*href=["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi
+          )
+        );
+        const snippetMatches = Array.from(
+          html.matchAll(
+            /<td\s+[^>]*class=["']result-snippet["'][^>]*>([\s\S]*?)<\/td>/gi
+          )
+        );
 
-      for (let i = 0; i < linkMatches.length && items.length < limit; i++) {
-        const m = linkMatches[i];
-        const rawUrl = m[1] || m[3] || "";
-        const rawTitle = m[2] || m[4] || "";
-        const rawSnippet = snippetMatches[i]?.[1] || "";
-        addResult(rawTitle, rawUrl, rawSnippet);
+        for (let i = 0; i < linkMatches.length && items.length < limit; i++) {
+          const m = linkMatches[i];
+          const rawUrl = m[1] || m[3] || "";
+          const rawTitle = m[2] || m[4] || "";
+          const rawSnippet = snippetMatches[i]?.[1] || "";
+          addResult(rawTitle, rawUrl, rawSnippet);
+        }
+        if (items.length > 0) break;
+      } catch {
+        // try the next DDG HTML endpoint
       }
     }
   } catch {
@@ -972,7 +1116,7 @@ async function fetchWikipediaOpenSearch(
           "WebCrawl/1.0 (https://webcrawl.app; search@webcrawl.app)",
         Accept: "application/json",
       },
-      signal: AbortSignal.timeout(1400),
+      signal: AbortSignal.timeout(2200),
     });
     if (!res.ok) {
       return [];
@@ -1024,7 +1168,7 @@ async function fetchHackerNewsAlgolia(
     )}&tags=story&hitsPerPage=${limit}`;
     const res = await fetch(url, {
       headers: { Accept: "application/json" },
-      signal: AbortSignal.timeout(1400),
+      signal: AbortSignal.timeout(2200),
     });
     if (!res.ok) {
       return [];

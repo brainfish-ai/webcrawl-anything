@@ -1,0 +1,372 @@
+/**
+ * Minimal Chrome DevTools Protocol client for local JS rendering.
+ *
+ * Inspired by Jina Reader's PuppeteerControl (page.goto + mutation-idle) and
+ * Firecrawl's Playwright/CDP engines: drive a real Chrome over CDP instead of
+ * `--dump-dom`, wait until the DOM is actually ready, and always bound the
+ * session with a hard timeout. No puppeteer/playwright dependency.
+ */
+import { spawn, type ChildProcess } from "node:child_process";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { chromeCdpArgs, killProcessGroup, type ChromeHeadlessMode } from "./chrome-launch.js";
+
+export interface CdpSnapshot {
+  html: string;
+  title: string;
+  textLen: number;
+  readyState: string;
+}
+
+export interface CdpRenderOptions {
+  timeoutMs: number;
+  headless: ChromeHeadlessMode;
+  /** Injected for tests. */
+  spawnChrome?: typeof spawn;
+}
+
+type CdpMessage = {
+  id?: number;
+  method?: string;
+  params?: Record<string, unknown>;
+  result?: Record<string, unknown>;
+  error?: { message?: string; code?: number };
+  sessionId?: string;
+};
+
+const SNAPSHOT_JS = `(() => {
+  const body = document.body;
+  const text = body && typeof body.innerText === "string" ? body.innerText.trim() : "";
+  return {
+    html: document.documentElement ? document.documentElement.outerHTML : "",
+    title: document.title || "",
+    textLen: text.length,
+    readyState: document.readyState || "",
+  };
+})()`;
+
+/** Jina-style mutationIdle (200ms quiet) + readyState complete, capped. */
+const WAIT_FOR_CONTENT_JS = `(async () => {
+  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+  const snap = () => {
+    const body = document.body;
+    const text = body && typeof body.innerText === "string" ? body.innerText.trim() : "";
+    return {
+      html: document.documentElement ? document.documentElement.outerHTML : "",
+      title: document.title || "",
+      textLen: text.length,
+      readyState: document.readyState || "",
+      elemCount: document.getElementsByTagName("*").length,
+    };
+  };
+  let lastMut = Date.now();
+  let observer = null;
+  try {
+    observer = new MutationObserver(() => { lastMut = Date.now(); });
+    if (document.documentElement) {
+      observer.observe(document.documentElement, {
+        subtree: true,
+        childList: true,
+        characterData: true,
+      });
+    }
+  } catch (_) { /* ignore */ }
+  const start = Date.now();
+  let last = snap();
+  while (Date.now() - start < 2500) {
+    await sleep(150);
+    const now = snap();
+    const quiet = Date.now() - lastMut >= 200;
+    const grown = now.elemCount > last.elemCount + 2 || now.textLen > last.textLen + 20;
+    last = now;
+    if (
+      now.readyState === "complete" &&
+      now.textLen >= 80 &&
+      quiet &&
+      !grown
+    ) break;
+  }
+  try { observer && observer.disconnect(); } catch (_) { /* ignore */ }
+  return last;
+})()`;
+
+export async function renderUrlViaCdp(
+  chromePath: string,
+  url: string,
+  opts: CdpRenderOptions
+): Promise<CdpSnapshot> {
+  const timeoutMs = Math.max(1_500, opts.timeoutMs);
+  const profile = mkdtempSync(join(tmpdir(), "wc-cdp-"));
+  const port = 40000 + Math.floor(Math.random() * 20000);
+  const spawnFn = opts.spawnChrome ?? spawn;
+  const args = chromeCdpArgs({
+    port,
+    profile,
+    headless: opts.headless,
+    binaryPath: chromePath,
+  });
+  let child: ChildProcess | undefined;
+  const ac = new AbortController();
+  const timer = setTimeout(() => ac.abort(), timeoutMs);
+  try {
+    child = spawnFn(chromePath, args, {
+      stdio: ["ignore", "ignore", "pipe"],
+      detached: true,
+    });
+    if (!child.pid) {
+      throw new Error("Chrome failed to start (no pid)");
+    }
+    let cdpReady = false;
+    child.once("exit", () => {
+      if (!cdpReady && !ac.signal.aborted) ac.abort();
+    });
+    const wsUrl = await waitForPageWebSocket(port, timeoutMs, ac.signal);
+    cdpReady = true;
+    const snapshot = await withCdpSession(wsUrl, url, timeoutMs, ac.signal);
+    if (!snapshot.html || snapshot.html.length < 40) {
+      throw new Error("CDP returned empty HTML");
+    }
+    return snapshot;
+  } catch (err) {
+    if (ac.signal.aborted) {
+      throw new Error(`CDP timed out after ${timeoutMs}ms`);
+    }
+    throw err;
+  } finally {
+    clearTimeout(timer);
+    if (child?.pid) killProcessGroup(child.pid, child);
+    try {
+      rmSync(profile, { recursive: true, force: true });
+    } catch {
+      /* leftover profile is in /tmp */
+    }
+  }
+}
+
+async function waitForPageWebSocket(
+  port: number,
+  timeoutMs: number,
+  signal: AbortSignal
+): Promise<string> {
+  const deadline = Date.now() + Math.min(timeoutMs, 8_000);
+  let lastErr = "CDP HTTP endpoint never became ready";
+  while (Date.now() < deadline) {
+    if (signal.aborted) throw new Error("Chrome CDP timed out while starting");
+    try {
+      const res = await fetch(`http://127.0.0.1:${port}/json/list`, {
+        signal: AbortSignal.timeout(400),
+      });
+      if (res.ok) {
+        const json = (await res.json()) as Array<{
+          type?: string;
+          webSocketDebuggerUrl?: string;
+        }>;
+        const page = (Array.isArray(json) ? json : []).find(
+          (t) => t.webSocketDebuggerUrl && (t.type === "page" || !t.type)
+        );
+        if (page?.webSocketDebuggerUrl) return page.webSocketDebuggerUrl;
+        lastErr = "CDP /json/list had no page websocket";
+      } else {
+        lastErr = `CDP /json/list HTTP ${res.status}`;
+      }
+    } catch (err) {
+      lastErr = err instanceof Error ? err.message : String(err);
+    }
+    await delay(80, signal);
+  }
+  throw new Error(lastErr);
+}
+
+async function withCdpSession(
+  wsUrl: string,
+  url: string,
+  timeoutMs: number,
+  signal: AbortSignal
+): Promise<CdpSnapshot> {
+  const client = await CdpClient.connect(wsUrl, signal);
+  const onAbort = () => client.close();
+  signal.addEventListener("abort", onAbort);
+  try {
+    await client.send("Page.enable");
+    await client.send("Runtime.enable");
+    const load = client.waitForEvent("Page.loadEventFired", Math.min(timeoutMs, 12_000));
+    const nav = await client.send("Page.navigate", { url });
+    if (nav.errorText) {
+      throw new Error(`Page.navigate failed: ${String(nav.errorText)}`);
+    }
+    try {
+      await load;
+    } catch {
+      /* take a snapshot anyway — Jina also keeps intermediate snapshots on goto timeout */
+    }
+    let snapshot = await evaluateSnapshot(client, WAIT_FOR_CONTENT_JS);
+    if (!snapshot || snapshot.textLen < 40 || snapshot.html.length < 80) {
+      snapshot = await evaluateSnapshot(client, SNAPSHOT_JS);
+    }
+    if (!snapshot) throw new Error("Runtime.evaluate returned no snapshot");
+    return snapshot;
+  } finally {
+    signal.removeEventListener("abort", onAbort);
+    client.close();
+  }
+}
+
+async function evaluateSnapshot(
+  client: CdpClient,
+  expression: string
+): Promise<CdpSnapshot | null> {
+  const result = await client.send(
+    "Runtime.evaluate",
+    { expression, returnByValue: true, awaitPromise: true }
+  );
+  const value = (result.result as { value?: CdpSnapshot } | undefined)?.value;
+  if (!value || typeof value.html !== "string") return null;
+  return {
+    html: value.html,
+    title: String(value.title ?? ""),
+    textLen: Number(value.textLen ?? 0),
+    readyState: String(value.readyState ?? ""),
+  };
+}
+
+class CdpClient {
+  private ws: WebSocket;
+  private nextId = 0;
+  private pending = new Map<
+    number,
+    { resolve: (v: Record<string, unknown>) => void; reject: (e: Error) => void }
+  >();
+  private eventWaiters: Array<{
+    method: string;
+    resolve: () => void;
+    reject: (err: Error) => void;
+  }> = [];
+
+  private constructor(ws: WebSocket) {
+    this.ws = ws;
+    ws.addEventListener("message", (ev) => {
+      let msg: CdpMessage;
+      try {
+        msg = JSON.parse(String(ev.data)) as CdpMessage;
+      } catch {
+        return;
+      }
+      if (msg.id != null) {
+        const p = this.pending.get(msg.id);
+        if (p) {
+          this.pending.delete(msg.id);
+          if (msg.error) {
+            p.reject(new Error(msg.error.message || `CDP error ${msg.error.code ?? ""}`));
+          } else {
+            p.resolve(msg.result ?? {});
+          }
+        }
+        return;
+      }
+      if (msg.method) {
+        for (const w of [...this.eventWaiters]) {
+          if (w.method === msg.method) {
+            this.eventWaiters = this.eventWaiters.filter((x) => x !== w);
+            w.resolve();
+          }
+        }
+      }
+    });
+  }
+
+  static connect(url: string, signal: AbortSignal): Promise<CdpClient> {
+    return new Promise((resolve, reject) => {
+      const ws = new WebSocket(url);
+      const onAbort = () => {
+        try {
+          ws.close();
+        } catch {
+          /* ignore */
+        }
+        reject(new Error("Chrome CDP websocket timed out"));
+      };
+      if (signal.aborted) {
+        onAbort();
+        return;
+      }
+      signal.addEventListener("abort", onAbort, { once: true });
+      ws.addEventListener("open", () => {
+        signal.removeEventListener("abort", onAbort);
+        resolve(new CdpClient(ws));
+      });
+      ws.addEventListener("error", () => {
+        signal.removeEventListener("abort", onAbort);
+        reject(new Error("Chrome CDP websocket failed"));
+      });
+    });
+  }
+
+  send(method: string, params: Record<string, unknown> = {}): Promise<Record<string, unknown>> {
+    const id = ++this.nextId;
+    return new Promise((resolve, reject) => {
+      this.pending.set(id, { resolve, reject });
+      try {
+        this.ws.send(JSON.stringify({ id, method, params }));
+      } catch (err) {
+        this.pending.delete(id);
+        reject(err instanceof Error ? err : new Error(String(err)));
+      }
+    });
+  }
+
+  waitForEvent(method: string, timeoutMs: number): Promise<void> {
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => {
+        this.eventWaiters = this.eventWaiters.filter((w) => w !== waiter);
+        reject(new Error(`Timed out waiting for ${method}`));
+      }, timeoutMs);
+      const waiter = {
+        method,
+        resolve: () => {
+          clearTimeout(timer);
+          resolve();
+        },
+        reject: (err: Error) => {
+          clearTimeout(timer);
+          reject(err);
+        },
+      };
+      this.eventWaiters.push(waiter);
+    });
+  }
+
+  close(): void {
+    for (const p of this.pending.values()) {
+      p.reject(new Error("CDP session closed"));
+    }
+    this.pending.clear();
+    for (const w of this.eventWaiters) {
+      w.reject(new Error("CDP session closed"));
+    }
+    this.eventWaiters = [];
+    try {
+      this.ws.close();
+    } catch {
+      /* ignore */
+    }
+  }
+}
+
+function delay(ms: number, signal: AbortSignal): Promise<void> {
+  return new Promise((resolve, reject) => {
+    if (signal.aborted) {
+      reject(new Error("aborted"));
+      return;
+    }
+    const t = setTimeout(resolve, ms);
+    signal.addEventListener(
+      "abort",
+      () => {
+        clearTimeout(t);
+        reject(new Error("aborted"));
+      },
+      { once: true }
+    );
+  });
+}
