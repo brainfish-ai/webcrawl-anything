@@ -7,8 +7,39 @@ import { join } from "node:path";
 import type { ChildProcess } from "node:child_process";
 
 export const DUMP_MAX_BYTES = 2 * 1024 * 1024;
+/** Page navigation + DOM-wait budget once Chrome is answering over CDP. */
 export const DEFAULT_TIMEOUT_MS = 18_000;
+/**
+ * How long to wait for Chrome to accept CDP after spawn. Kept short and
+ * separate from `DEFAULT_TIMEOUT_MS` so a hung binary fails fast while a
+ * slow but working JS page (often ~7s) still has time to render.
+ */
+export const DEFAULT_CONNECT_TIMEOUT_MS = 4_000;
 export const VIRTUAL_TIME_MS = 10_000;
+
+function envPositiveMs(name: string, fallback: number, min: number): number {
+  const raw = process.env[name];
+  if (raw == null || raw.trim() === "") return fallback;
+  const n = Number(raw);
+  if (!Number.isFinite(n) || n <= 0) return fallback;
+  return Math.max(min, n);
+}
+
+/** `opts.timeoutMs`, else `WEBCRAWL_CHROME_TIMEOUT_MS`, else 18s. */
+export function resolveChromeTimeoutMs(override?: number): number {
+  if (typeof override === "number" && Number.isFinite(override) && override > 0) {
+    return Math.max(1_500, override);
+  }
+  return envPositiveMs("WEBCRAWL_CHROME_TIMEOUT_MS", DEFAULT_TIMEOUT_MS, 1_500);
+}
+
+/** `opts.connectTimeoutMs`, else `WEBCRAWL_CHROME_CONNECT_TIMEOUT_MS`, else 4s. */
+export function resolveChromeConnectTimeoutMs(override?: number): number {
+  if (typeof override === "number" && Number.isFinite(override) && override > 0) {
+    return Math.max(500, override);
+  }
+  return envPositiveMs("WEBCRAWL_CHROME_CONNECT_TIMEOUT_MS", DEFAULT_CONNECT_TIMEOUT_MS, 500);
+}
 
 export type ChromeHeadlessMode = "new" | "old" | "shell";
 

@@ -9,7 +9,22 @@ import { spawn, type ChildProcess } from "node:child_process";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { chromeCdpArgs, killProcessGroup, type ChromeHeadlessMode } from "./chrome-launch.js";
+import {
+  chromeCdpArgs,
+  killProcessGroup,
+  resolveChromeConnectTimeoutMs,
+  type ChromeHeadlessMode,
+} from "./chrome-launch.js";
+
+/** Chrome spawned but CDP never became ready. `hung` is true when the process was still alive. */
+export class ChromeConnectError extends Error {
+  readonly hung: boolean;
+  constructor(message: string, hung = false) {
+    super(message);
+    this.name = "ChromeConnectError";
+    this.hung = hung;
+  }
+}
 
 export interface CdpSnapshot {
   html: string;
@@ -20,6 +35,8 @@ export interface CdpSnapshot {
 
 export interface CdpRenderOptions {
   timeoutMs: number;
+  /** CDP launch/connect budget. Defaults to 4s (`WEBCRAWL_CHROME_CONNECT_TIMEOUT_MS`). */
+  connectTimeoutMs?: number;
   headless: ChromeHeadlessMode;
   /** Injected for tests. */
   spawnChrome?: typeof spawn;
@@ -90,12 +107,17 @@ const WAIT_FOR_CONTENT_JS = `(async () => {
   return last;
 })()`;
 
+function childStillRunning(child?: ChildProcess): boolean {
+  return Boolean(child && child.pid && child.exitCode == null && !child.killed);
+}
+
 export async function renderUrlViaCdp(
   chromePath: string,
   url: string,
   opts: CdpRenderOptions
 ): Promise<CdpSnapshot> {
   const timeoutMs = Math.max(1_500, opts.timeoutMs);
+  const connectTimeoutMs = resolveChromeConnectTimeoutMs(opts.connectTimeoutMs);
   const profile = mkdtempSync(join(tmpdir(), "wc-cdp-"));
   const port = 40000 + Math.floor(Math.random() * 20000);
   const spawnFn = opts.spawnChrome ?? spawn;
@@ -106,7 +128,9 @@ export async function renderUrlViaCdp(
     binaryPath: chromePath,
   });
   let child: ChildProcess | undefined;
+  let cdpReady = false;
   const ac = new AbortController();
+  // Page budget covers navigation after connect; connect has its own deadline.
   const timer = setTimeout(() => ac.abort(), timeoutMs);
   try {
     child = spawnFn(chromePath, args, {
@@ -116,11 +140,10 @@ export async function renderUrlViaCdp(
     if (!child.pid) {
       throw new Error("Chrome failed to start (no pid)");
     }
-    let cdpReady = false;
     child.once("exit", () => {
       if (!cdpReady && !ac.signal.aborted) ac.abort();
     });
-    const wsUrl = await waitForPageWebSocket(port, timeoutMs, ac.signal);
+    const wsUrl = await waitForPageWebSocket(port, connectTimeoutMs, ac.signal);
     cdpReady = true;
     const snapshot = await withCdpSession(wsUrl, url, timeoutMs, ac.signal);
     if (!snapshot.html || snapshot.html.length < 40) {
@@ -128,6 +151,16 @@ export async function renderUrlViaCdp(
     }
     return snapshot;
   } catch (err) {
+    if (!cdpReady) {
+      const hung = childStillRunning(child);
+      const detail = err instanceof Error ? err.message : String(err);
+      throw new ChromeConnectError(
+        hung
+          ? `Chrome did not respond over CDP within ${connectTimeoutMs}ms`
+          : `Chrome CDP failed to start (${detail})`,
+        hung
+      );
+    }
     if (ac.signal.aborted) {
       throw new Error(`CDP timed out after ${timeoutMs}ms`);
     }
@@ -145,10 +178,10 @@ export async function renderUrlViaCdp(
 
 async function waitForPageWebSocket(
   port: number,
-  timeoutMs: number,
+  connectTimeoutMs: number,
   signal: AbortSignal
 ): Promise<string> {
-  const deadline = Date.now() + Math.min(timeoutMs, 8_000);
+  const deadline = Date.now() + connectTimeoutMs;
   let lastErr = "CDP HTTP endpoint never became ready";
   while (Date.now() < deadline) {
     if (signal.aborted) throw new Error("Chrome CDP timed out while starting");

@@ -1,4 +1,4 @@
-export { main, HELP, type Deps, type Io } from "./cli.js";
+export { main, HELP, packageVersion, type Deps, type Io } from "./cli.js";
 export {
   SUPPORTED_AGENTS,
   WEBCRAWL_SKILL_MD,

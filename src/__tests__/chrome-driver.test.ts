@@ -4,10 +4,13 @@ import { chmodSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
+  DEFAULT_CONNECT_TIMEOUT_MS,
   chromeCdpArgs,
   chromeDumpDomArgs,
   parseDevToolsActivePort,
   renderViaLocalChromeDetailed,
+  resolveChromeConnectTimeoutMs,
+  resolveChromeTimeoutMs,
 } from "../engine/chrome.js";
 
 describe("local Chrome driver", () => {
@@ -39,22 +42,66 @@ describe("local Chrome driver", () => {
     assert.equal(args.includes("--headless=new"), false);
   });
 
+  it("connect timeout env/option defaults are 4s launch vs 18s page", () => {
+    const prevConnect = process.env.WEBCRAWL_CHROME_CONNECT_TIMEOUT_MS;
+    const prevPage = process.env.WEBCRAWL_CHROME_TIMEOUT_MS;
+    try {
+      delete process.env.WEBCRAWL_CHROME_CONNECT_TIMEOUT_MS;
+      delete process.env.WEBCRAWL_CHROME_TIMEOUT_MS;
+      assert.equal(resolveChromeConnectTimeoutMs(), DEFAULT_CONNECT_TIMEOUT_MS);
+      assert.equal(resolveChromeConnectTimeoutMs(), 4_000);
+      assert.equal(resolveChromeTimeoutMs(), 18_000);
+      process.env.WEBCRAWL_CHROME_CONNECT_TIMEOUT_MS = "2500";
+      process.env.WEBCRAWL_CHROME_TIMEOUT_MS = "9000";
+      assert.equal(resolveChromeConnectTimeoutMs(), 2500);
+      assert.equal(resolveChromeTimeoutMs(), 9000);
+      assert.equal(resolveChromeConnectTimeoutMs(6_000), 6_000);
+    } finally {
+      if (prevConnect === undefined) delete process.env.WEBCRAWL_CHROME_CONNECT_TIMEOUT_MS;
+      else process.env.WEBCRAWL_CHROME_CONNECT_TIMEOUT_MS = prevConnect;
+      if (prevPage === undefined) delete process.env.WEBCRAWL_CHROME_TIMEOUT_MS;
+      else process.env.WEBCRAWL_CHROME_TIMEOUT_MS = prevPage;
+    }
+  });
+
   it("hard-timeouts a hanging Chrome binary instead of waiting forever", async () => {
     const dir = mkdtempSync(join(tmpdir(), "wc-hang-chrome-"));
     const bin = join(dir, "hang-chrome");
-    writeFileSync(bin, "#!/bin/sh\nexec sleep 60\n");
+    // Listen on the CDP port but never answer, matching Chrome-up/CDP-dead hangs.
+    writeFileSync(
+      bin,
+      `#!/usr/bin/env node
+const { createServer } = require("node:http");
+const arg = process.argv.find((a) => String(a).startsWith("--remote-debugging-port="));
+const port = arg ? Number(String(arg).slice("--remote-debugging-port=".length)) : 0;
+if (port) createServer(() => {}).listen(port, "127.0.0.1");
+setInterval(() => {}, 60_000);
+`
+    );
     chmodSync(bin, 0o755);
     const prev = process.env.WEBCRAWL_CHROME_PATH;
     process.env.WEBCRAWL_CHROME_PATH = bin;
     const t0 = Date.now();
     try {
-      const out = await renderViaLocalChromeDetailed("https://example.com/", { timeoutMs: 2500 });
+      const out = await renderViaLocalChromeDetailed("https://example.com/", { binaries: [bin] });
       const ms = Date.now() - t0;
       assert.equal(out.html, null);
-      assert.ok(out.error && /JavaScript rendering failed|timed out|no content|never became ready/i.test(out.error), out.error);
-      assert.ok(ms < 12_000, `hang should die in a few seconds, took ${ms}ms`);
+      assert.ok(
+        out.error &&
+          /JavaScript rendering failed|did not respond over CDP|timed out|no content|never became ready/i.test(
+            out.error
+          ),
+        out.error
+      );
+      assert.match(String(out.error), /did not respond over CDP within \d+ms/);
+      assert.ok(ms < 12_000, `hang should die in a few seconds with default timeouts, took ${ms}ms`);
       assert.ok(out.attempts.length >= 1);
       assert.equal(out.attempts.every((a) => a.ok === false), true);
+      assert.equal(out.attempts.some((a) => a.method.includes("dump-dom")), false);
+      assert.ok(
+        out.attempts.every((a) => a.ms < 6_000),
+        JSON.stringify(out.attempts)
+      );
     } finally {
       if (prev === undefined) delete process.env.WEBCRAWL_CHROME_PATH;
       else process.env.WEBCRAWL_CHROME_PATH = prev;
@@ -78,7 +125,10 @@ exit 1
     const prev = process.env.WEBCRAWL_CHROME_PATH;
     process.env.WEBCRAWL_CHROME_PATH = bin;
     try {
-      const out = await renderViaLocalChromeDetailed("https://example.com/", { timeoutMs: 8000 });
+      const out = await renderViaLocalChromeDetailed("https://example.com/", {
+        timeoutMs: 8000,
+        binaries: [bin],
+      });
       assert.ok(out.html && /Enough content for the markdown floor/.test(out.html), JSON.stringify(out));
       assert.match(String(out.method), /dump-dom/);
     } finally {
