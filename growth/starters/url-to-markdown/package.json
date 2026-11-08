@@ -1,0 +1,30 @@
+{
+  "name": "@webcrawl/starter-url-to-markdown",
+  "version": "0.0.0",
+  "private": true,
+  "description": "v0-ready starter: scrape a public URL into clean Markdown via webcrawl hosted API or local CLI",
+  "type": "module",
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "test": "node --import tsx --test test/*.test.ts",
+    "test:live": "LIVE=1 node --import tsx --test test/live.test.ts"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "@webcrawl/client": "^1.4.4",
+    "next": "^16.4.5",
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "@types/react": "^19.2.0",
+    "@types/react-dom": "^19.2.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.7.0"
+  }
+}

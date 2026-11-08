@@ -12,9 +12,9 @@ npx skills add brainfish-ai/webcrawl-anything
 npx webcrawl setup
 ```
 
-Skills live in [`.agents/skills/`](../.agents/skills/) and follow the open Agent Skills spec: `name` matches the directory, `description` is the routing trigger, and details live in `references/*.md` (progressive disclosure).
+Skills live in [`.agents/skills/`](../.agents/skills/) and follow the open Agent Skills spec: `name` matches the directory, `description` is the routing trigger, and details live in `references/*.md` (progressive disclosure). Install one skill with `npx skills add brainfish-ai/webcrawl-anything --skill <name>` ([skills.sh CLI](https://www.skills.sh/docs/cli)).
 
-## The eight skills
+## Task skills
 
 | Skill | One-liner | Hero |
 |---|---|---|
@@ -26,6 +26,15 @@ Skills live in [`.agents/skills/`](../.agents/skills/) and follow the open Agent
 | [`webcrawl-learn-topic`](../.agents/skills/webcrawl-learn-topic/SKILL.md) | Deep-research any topic into a cited digest with a reading list | |
 | [`webcrawl-research-corpus`](../.agents/skills/webcrawl-research-corpus/SKILL.md) | Build RAG-ready Markdown corpora from docs sites (llms.txt, sitemaps, hash dedupe) | |
 | [`webcrawl-real-estate`](../.agents/skills/webcrawl-real-estate/SKILL.md) | Property listing search & watch with the built-in extractor; new-listing/price-cut alerts | |
+
+## Access skills
+
+| Skill | One-liner |
+|---|---|
+| [`webcrawl-hosted`](../.agents/skills/webcrawl-hosted/SKILL.md) | Connect to webcrawl.app REST, `@webcrawl/client`, login, and `https://webcrawl.app/mcp` |
+| [`webcrawl-local`](../.agents/skills/webcrawl-local/SKILL.md) | Zero-key local Node engine (`npx webcrawl --mode local`, doctor, optional Chrome) |
+
+Runnable Next.js starters that keep keys on the server: [docs/growth.md](./growth.md).
 
 ## Trigger phrases (routing test matrix)
 
@@ -62,6 +71,14 @@ Each skill's `description` is what routes a user request to it. Use these phrase
 ### webcrawl-real-estate
 - ✅ "find 3BR houses in Marrickville under $1.4M" · "watch this suburb for new listings" · "track rent prices in Bronte" · "alert me when this property's price drops"
 - ❌ "estimate my mortgage" · "contact the agent" · non-property pages
+
+### webcrawl-hosted
+- ✅ "call the webcrawl.app API" · "set WEBCRAWL_API_KEY in my server route" · "add https://webcrawl.app/mcp" · "npx webcrawl login"
+- ❌ "scrape this URL locally with no key" (webcrawl-local) · "watch Amazon prices" (webcrawl-deal-watch)
+
+### webcrawl-local
+- ✅ "npx webcrawl doctor" · "scrape with no API key" · "local Chrome for JS pages" · "WEBCRAWL_MODE=local"
+- ❌ "create a cloud monitor" (webcrawl-hosted) · Edge/serverless Chromium (not supported)
 
 ## Skill anatomy (for contributors)
 

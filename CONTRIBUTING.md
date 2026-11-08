@@ -91,6 +91,7 @@ Run `npm test && npm run test:packages` before opening your Pull Request.
 - [`good first issue`](https://github.com/brainfish-ai/webcrawl-anything/issues?q=is%3Aopen+label%3A%22good+first+issue%22) issues are scoped to one file plus a test.
 - [`target-plugin`](https://github.com/brainfish-ai/webcrawl-anything/issues?q=is%3Aopen+label%3Atarget-plugin) issues ask for a new site. Comment "I'll take this" so nobody duplicates the work.
 - Found a site that breaks? Open a bug with the exact `npx webcrawl …` command and its output.
+- Public access skills and v0-ready starters: [docs/growth.md](./docs/growth.md). Do not publish skills.sh packs or v0 gallery listings from a drive-by PR.
 
 ## How you get credit
 

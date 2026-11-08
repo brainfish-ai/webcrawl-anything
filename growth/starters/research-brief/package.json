@@ -1,0 +1,30 @@
+{
+  "name": "@webcrawl/starter-research-brief",
+  "version": "0.0.0",
+  "private": true,
+  "description": "v0-ready starter: search and scrape real pages, then quote retrieved excerpts with source URLs",
+  "type": "module",
+  "scripts": {
+    "dev": "next dev --port 3001",
+    "build": "next build",
+    "start": "next start --port 3001",
+    "test": "node --import tsx --test test/*.test.ts",
+    "test:live": "LIVE=1 node --import tsx --test test/live.test.ts"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "@webcrawl/client": "^1.4.4",
+    "next": "^16.4.5",
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "@types/react": "^19.2.0",
+    "@types/react-dom": "^19.2.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.7.0"
+  }
+}

@@ -29,7 +29,7 @@
 npx skills add brainfish-ai/webcrawl-anything
 ```
 
-That installs all eight Webcrawl [Agent Skills](#agent-skills-any-coding-agent) into Claude Code, Cursor, Codex, Gemini, Windsurf or any agent that reads `SKILL.md`. Only want one? Pick it by name:
+That installs the Webcrawl [Agent Skills](#agent-skills-any-coding-agent) into Claude Code, Cursor, Codex, Gemini, Windsurf or any agent that reads `SKILL.md`. Only want one? Pick it by name:
 
 ```bash
 npx skills add brainfish-ai/webcrawl-anything --skill webcrawl-deal-watch
@@ -129,8 +129,10 @@ npx skills add brainfish-ai/webcrawl-anything --skill webcrawl-deal-watch
 | **`webcrawl-learn-topic`** | Deep-research any topic: search → crawl authoritative sources → cited digest with a reading list. |
 | **`webcrawl-research-corpus`** | Build RAG-ready Markdown corpora from docs sites: llms.txt, sitemaps, path scoping, hash dedupe. |
 | **`webcrawl-real-estate`** | Search & monitor property listings with the built-in extractor — new-listing and price-reduction alerts. |
+| **`webcrawl-hosted`** | Hosted webcrawl.app access: REST `/v1/*`, `@webcrawl/client`, login, hosted MCP. |
+| **`webcrawl-local`** | Keyless local engine: `npx webcrawl --mode local`, doctor, optional Chrome. |
 
-See [docs/skills.md](./docs/skills.md) for details and trigger phrases per skill.
+See [docs/skills.md](./docs/skills.md) for details and trigger phrases per skill. Small v0-ready apps (URL reader, research brief) are in [docs/growth.md](./docs/growth.md). Those folders are repo starters, not published v0 templates.
 
 ---
 

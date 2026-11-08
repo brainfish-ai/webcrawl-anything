@@ -39,3 +39,39 @@ jobs:
 
       - name: Run core engine unit tests
         run: npm test
+
+  growth-assets:
+    name: Skills and starters
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+
+      - name: Validate Agent Skills frontmatter
+        run: node growth/scripts/validate-skills.mjs
+
+      - name: Validate new skills with skills-ref
+        run: |
+          npx --yes skills-ref@0.1.5 validate .agents/skills/webcrawl-hosted
+          npx --yes skills-ref@0.1.5 validate .agents/skills/webcrawl-local
+
+      - name: Test and build URL-to-Markdown starter
+        working-directory: growth/starters/url-to-markdown
+        run: |
+          npm ci
+          npm test
+          npm run build
+
+      - name: Test and build research-brief starter
+        working-directory: growth/starters/research-brief
+        run: |
+          npm ci
+          npm test
+          npm run build
