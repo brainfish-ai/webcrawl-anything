@@ -1,6 +1,6 @@
 {
   "name": "@webcrawl/curl-impersonate",
-  "version": "1.4.4",
+  "version": "1.4.5",
   "description": "Zero-dependency curl-impersonate fetch for Node.js — pinned lexiforest binary, Chrome TLS/HTTP2 fingerprint impersonation (chrome150 default), automatic per-platform download with sha256 verification",
   "type": "module",
   "license": "MIT",
