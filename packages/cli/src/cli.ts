@@ -2,7 +2,9 @@ import { execFile } from "node:child_process";
 import crypto from "node:crypto";
 import { readFileSync } from "node:fs";
 import { createServer } from "node:http";
+import { dirname, join } from "node:path";
 import { createInterface } from "node:readline";
+import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
 import {
   WebcrawlClient,
@@ -89,6 +91,7 @@ Options
   --webhook <url>     Alert webhook URL when triggered
   --agent <name>      Target agent for setup: claude, cursor, codex, gemini, windsurf, or all (repeatable)
   --schema-profile    MCP schema profile for setup: compact (default) or full
+  -v, --version       Print the installed package version
   -h, --help
 
 Config order: flags, then WEBCRAWL_API_KEY / WEBCRAWL_URL / WEBCRAWL_MODE, then ~/.config/webcrawl/config.json`;
@@ -96,6 +99,7 @@ Config order: flags, then WEBCRAWL_API_KEY / WEBCRAWL_URL / WEBCRAWL_MODE, then 
 const OPTIONS = {
   json: { type: "boolean" },
   help: { type: "boolean", short: "h" },
+  version: { type: "boolean", short: "v" },
   "api-key": { type: "string" },
   url: { type: "string" },
   mode: { type: "string" },
@@ -129,6 +133,16 @@ const OPTIONS = {
 } as const;
 
 class UsageError extends Error {}
+
+/** Installed `webcrawl` version, read from package.json at runtime. */
+export function packageVersion(): string {
+  const pkgPath = join(dirname(fileURLToPath(import.meta.url)), "..", "package.json");
+  const pkg = JSON.parse(readFileSync(pkgPath, "utf8")) as { version?: string };
+  if (!pkg.version) {
+    throw new Error("package.json is missing a version field");
+  }
+  return pkg.version;
+}
 
 function int(v: string | undefined, name: string): number | undefined {
   if (v === undefined) {return undefined;}
@@ -443,6 +457,10 @@ export async function main(argv: string[], io: Io, deps: Deps = {}): Promise<num
   }
   const { values: v, positionals } = parsed;
   const [cmd, ...rest] = positionals;
+  if (v.version) {
+    io.out(`${packageVersion()}\n`);
+    return 0;
+  }
   if (v.help || !cmd || cmd === "help") {
     io.out(`${HELP}\n`);
     return cmd || v.help ? 0 : 2;

@@ -15,19 +15,19 @@ import { spawn } from "node:child_process";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { renderUrlViaCdp } from "./chrome-cdp.js";
+import { ChromeConnectError, renderUrlViaCdp } from "./chrome-cdp.js";
 import {
-  DEFAULT_TIMEOUT_MS,
   DUMP_MAX_BYTES,
   chromeDumpDomArgs,
   discoverChromeBinaries,
-  installedChromePath,
-  isLocalChromeAvailable,
   killProcessGroup,
+  resolveChromeConnectTimeoutMs,
+  resolveChromeTimeoutMs,
   type ChromeHeadlessMode,
 } from "./chrome-launch.js";
 
 export {
+  DEFAULT_CONNECT_TIMEOUT_MS,
   DEFAULT_TIMEOUT_MS,
   VIRTUAL_TIME_MS,
   discoverChromeBinaries,
@@ -38,8 +38,11 @@ export {
   chromeCdpArgs,
   chromeDumpDomArgs,
   killProcessGroup,
+  resolveChromeConnectTimeoutMs,
+  resolveChromeTimeoutMs,
   type ChromeHeadlessMode,
 } from "./chrome-launch.js";
+export { ChromeConnectError } from "./chrome-cdp.js";
 
 export interface ChromeRenderAttempt {
   ok: boolean;
@@ -84,7 +87,7 @@ function methodName(binary: string, kind: AttemptKind): string {
  */
 export async function renderViaLocalChrome(
   url: string,
-  opts: { timeoutMs?: number } = {}
+  opts: { timeoutMs?: number; connectTimeoutMs?: number; binaries?: string[] } = {}
 ): Promise<string | null> {
   const result = await renderViaLocalChromeDetailed(url, opts);
   return result.html;
@@ -97,9 +100,9 @@ export async function renderViaLocalChrome(
  */
 export async function renderViaLocalChromeDetailed(
   url: string,
-  opts: { timeoutMs?: number } = {}
+  opts: { timeoutMs?: number; connectTimeoutMs?: number; binaries?: string[] } = {}
 ): Promise<ChromeRenderResult> {
-  const binaries = discoverChromeBinaries();
+  const binaries = opts.binaries?.length ? opts.binaries : discoverChromeBinaries();
   if (binaries.length === 0) {
     return {
       html: null,
@@ -109,15 +112,19 @@ export async function renderViaLocalChromeDetailed(
       attempts: [],
     };
   }
-  const budgetMs = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+  const budgetMs = resolveChromeTimeoutMs(opts.timeoutMs);
+  const connectTimeoutMs = resolveChromeConnectTimeoutMs(opts.connectTimeoutMs);
   const started = Date.now();
   const attempts: ChromeRenderAttempt[] = [];
   let lastError = "local Chrome produced no content";
 
   for (const binary of binaries) {
+    let hungConnect = false;
     for (const kind of attemptPlan(binary)) {
       const remaining = budgetMs - (Date.now() - started);
       if (remaining < 1_200) break;
+      // A process that launched but never answered CDP will hang dump-dom too.
+      if (kind.driver === "dump-dom" && hungConnect) continue;
       const method = methodName(binary, kind);
       const attemptBudget =
         kind.driver === "cdp"
@@ -129,6 +136,7 @@ export async function renderViaLocalChromeDetailed(
           kind.driver === "cdp"
             ? (await renderUrlViaCdp(binary, url, {
                 timeoutMs: attemptBudget,
+                connectTimeoutMs: Math.min(connectTimeoutMs, remaining),
                 headless: kind.headless,
               })).html
             : await dumpDom(binary, url, kind.headless, attemptBudget);
@@ -143,6 +151,7 @@ export async function renderViaLocalChromeDetailed(
         const ms = Date.now() - t0;
         lastError = `${method}: ${err instanceof Error ? err.message : String(err)}`;
         attempts.push({ ok: false, method, ms, error: lastError });
+        if (err instanceof ChromeConnectError && err.hung) hungConnect = true;
       }
     }
   }

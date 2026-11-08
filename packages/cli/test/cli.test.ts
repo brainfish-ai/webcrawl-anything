@@ -1,9 +1,14 @@
 import assert from "node:assert/strict";
 import { mkdtempSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { describe, it } from "node:test";
 import { main } from "../src/index.js";
+
+const cliPackageVersion = JSON.parse(
+  readFileSync(join(dirname(fileURLToPath(import.meta.url)), "../package.json"), "utf8")
+).version as string;
 
 function setup(handler: (url: string, body?: Record<string, unknown>) => { status?: number; json: unknown } = () => ({ json: {} }), stdin = "") {
   const dir = mkdtempSync(join(tmpdir(), "wc-cli-"));
@@ -78,6 +83,19 @@ describe("webcrawl CLI", () => {
     assert.equal(await t.run([]), 2);
     assert.equal(await t.run(["--help"]), 0);
     assert.match(t.out(), /Usage: webcrawl/);
+    assert.match(t.out(), /-v, --version/);
+  });
+
+  it("--version and -v print the installed package version and exit 0", async () => {
+    const t = setup();
+    assert.equal(await t.run(["--version"]), 0);
+    assert.equal(t.out().trim(), cliPackageVersion);
+    assert.equal(t.err(), "");
+    assert.match(cliPackageVersion, /^\d+\.\d+\.\d+/);
+    const t2 = setup();
+    assert.equal(await t2.run(["-v"]), 0);
+    assert.equal(t2.out().trim(), cliPackageVersion);
+    assert.equal(t2.err(), "");
   });
 
   it("API failures exit 1 with an actionable message", async () => {
