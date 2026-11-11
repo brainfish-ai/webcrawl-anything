@@ -9,13 +9,13 @@
     "subfolder": "packages/mcp"
   },
   "websiteUrl": "https://github.com/brainfish-ai/webcrawl-anything#readme",
-  "version": "1.4.5",
+  "version": "1.4.6",
   "packages": [
     {
       "registryType": "npm",
       "registryBaseUrl": "https://registry.npmjs.org",
       "identifier": "@webcrawl/mcp",
-      "version": "1.4.5",
+      "version": "1.4.6",
       "transport": {
         "type": "stdio"
       },

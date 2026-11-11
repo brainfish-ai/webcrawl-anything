@@ -15,6 +15,11 @@ import {
   resolveChromeConnectTimeoutMs,
   type ChromeHeadlessMode,
 } from "./chrome-launch.js";
+import {
+  CONTENT_READY_MAX_WAIT_MS,
+  SERIALIZE_DOC_FN,
+  buildWaitForContentReadyExpression,
+} from "./content-ready.js";
 
 /** Chrome spawned but CDP never became ready. `hung` is true when the process was still alive. */
 export class ChromeConnectError extends Error {
@@ -53,58 +58,30 @@ type CdpMessage = {
 
 const SNAPSHOT_JS = `(() => {
   const body = document.body;
-  const text = body && typeof body.innerText === "string" ? body.innerText.trim() : "";
+  let text = body && typeof body.innerText === "string" ? body.innerText.trim() : "";
+  let html = "";
+  try { html = (${SERIALIZE_DOC_FN})(); } catch (_) {
+    html = document.documentElement ? document.documentElement.outerHTML : "";
+  }
+  try {
+    if (body) {
+      for (const el of body.querySelectorAll("*")) {
+        if (el.shadowRoot) text += " " + (el.shadowRoot.textContent || "");
+        if (String(el.tagName || "").toUpperCase() === "IFRAME") {
+          try {
+            const doc = el.contentDocument;
+            if (doc && doc.body) text += " " + (doc.body.innerText || "");
+          } catch (_) {}
+        }
+      }
+    }
+  } catch (_) {}
   return {
-    html: document.documentElement ? document.documentElement.outerHTML : "",
+    html,
     title: document.title || "",
-    textLen: text.length,
+    textLen: text.replace(/\\s+/g, " ").trim().length,
     readyState: document.readyState || "",
   };
-})()`;
-
-/** mutationIdle (200ms quiet) plus readyState complete, capped. */
-const WAIT_FOR_CONTENT_JS = `(async () => {
-  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-  const snap = () => {
-    const body = document.body;
-    const text = body && typeof body.innerText === "string" ? body.innerText.trim() : "";
-    return {
-      html: document.documentElement ? document.documentElement.outerHTML : "",
-      title: document.title || "",
-      textLen: text.length,
-      readyState: document.readyState || "",
-      elemCount: document.getElementsByTagName("*").length,
-    };
-  };
-  let lastMut = Date.now();
-  let observer = null;
-  try {
-    observer = new MutationObserver(() => { lastMut = Date.now(); });
-    if (document.documentElement) {
-      observer.observe(document.documentElement, {
-        subtree: true,
-        childList: true,
-        characterData: true,
-      });
-    }
-  } catch (_) { /* ignore */ }
-  const start = Date.now();
-  let last = snap();
-  while (Date.now() - start < 2500) {
-    await sleep(150);
-    const now = snap();
-    const quiet = Date.now() - lastMut >= 200;
-    const grown = now.elemCount > last.elemCount + 2 || now.textLen > last.textLen + 20;
-    last = now;
-    if (
-      now.readyState === "complete" &&
-      now.textLen >= 80 &&
-      quiet &&
-      !grown
-    ) break;
-  }
-  try { observer && observer.disconnect(); } catch (_) { /* ignore */ }
-  return last;
 })()`;
 
 function childStillRunning(child?: ChildProcess): boolean {
@@ -232,7 +209,36 @@ async function withCdpSession(
     } catch {
       /* take a snapshot anyway if navigation load times out */
     }
-    let snapshot = await evaluateSnapshot(client, WAIT_FOR_CONTENT_JS);
+    // Leave headroom for the final snapshot evaluate inside the page budget.
+    const readyBudget = Math.max(
+      1_500,
+      Math.min(CONTENT_READY_MAX_WAIT_MS, timeoutMs - 1_000)
+    );
+    const deadline = Date.now() + readyBudget;
+    let snapshot: CdpSnapshot | null = null;
+    // Client-side redirects destroy the execution context mid-wait. Retry only
+    // after an evaluate failure (not by racing loadEventFired, which can fire
+    // spuriously in CI and restart a healthy wait until the budget is gone).
+    while (Date.now() < deadline) {
+      const remaining = Math.max(400, deadline - Date.now());
+      try {
+        snapshot = await evaluateSnapshot(
+          client,
+          buildWaitForContentReadyExpression(remaining)
+        );
+        break;
+      } catch {
+        try {
+          await client.waitForEvent(
+            "Page.loadEventFired",
+            Math.min(remaining, 5_000)
+          );
+        } catch {
+          /* take a snapshot on the current document anyway */
+        }
+        await delay(120, signal).catch(() => {});
+      }
+    }
     if (!snapshot || snapshot.textLen < 40 || snapshot.html.length < 80) {
       snapshot = await evaluateSnapshot(client, SNAPSHOT_JS);
     }

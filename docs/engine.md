@@ -4,7 +4,7 @@ Webcrawl's local engine is in `src/`. The CLI and MCP server call the same code.
 
 ## JavaScript pages
 
-Static HTML is fetched without a browser. Pages that only fill in after scripts run are opened in local Chrome over the Chrome DevTools Protocol. The driver waits until the document is loaded and the DOM has been quiet for a short interval, then reads the rendered HTML.
+Static HTML is fetched without a browser. Pages that only fill in after scripts run are opened in local Chrome over the Chrome DevTools Protocol. After load, the driver polls main-content text length and DOM size (including open shadow roots and same-origin iframes) until the page looks stable. Visible loading placeholders and empty content mounts stay "not ready"; after the first content growth the quiet window is about **1.5s** so staggered chunk fetches are included, otherwise about **500ms**. The post-load wait is capped (about **10 seconds**) so never-settling pages cannot hang. Tiny finished pages (404, OK, image-only) are allowed to finish early. The non-JS fetch path is unchanged. Lazy-below-the-fold content is not scrolled into view.
 
 Each attempt has a hard timeout. Chrome launch and CDP connect default to **4 seconds** (`WEBCRAWL_CHROME_CONNECT_TIMEOUT_MS`, or `connectTimeoutMs` on the renderer). Page navigation and DOM wait default to **18 seconds** (`WEBCRAWL_CHROME_TIMEOUT_MS` / `timeoutMs`). Those budgets are separate: a hung binary that never answers over CDP fails fast instead of waiting out the page timeout, while a slow but working JS page (often around 7 seconds) still has time to render after Chrome connects.
 
