@@ -442,6 +442,15 @@ export async function fetchWithTlsImpersonation(
   url: string,
   timeoutMs = 12_000
 ): Promise<{ status: number; html: string; headers: Record<string, string> }> {
+  const { status, body, headers } = await fetchTlsResource(url, timeoutMs);
+  return { status, html: new TextDecoder().decode(body), headers };
+}
+
+/** Keeps the HTML transport's cookies and headers while retaining the original bytes. */
+export async function fetchTlsResource(
+  url: string,
+  timeoutMs = 12_000
+): Promise<FetchedResource> {
   // Session hydration: when a warm stealth session exists for this domain, its
   // solved cookies (and the UA they were solved under — bound cookies require
   // the pair) ride the request so the lightweight tier can skip the challenge.
@@ -475,8 +484,10 @@ export async function fetchWithTlsImpersonation(
   }
   return {
     status: res.status,
-    html: new TextDecoder().decode(res.body),
     headers: res.headers,
+    contentType: (res.headers["content-type"] || "").split(";")[0].trim().toLowerCase(),
+    body: new Uint8Array(res.body),
+    url: finalUrl,
   };
 }
 

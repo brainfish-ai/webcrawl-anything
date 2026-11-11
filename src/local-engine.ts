@@ -28,10 +28,13 @@ import {
 import { isRenderProviderEnabled, renderViaProvider } from "./engine/render.js";
 import {
   fetchResource,
+  fetchTlsResource,
+  type FetchedResource,
   isAntiBotChallenge,
   lastFetchTier,
   needsBrowserEscalation,
 } from "./engine/fetcher.js";
+import { detectFileKind } from "./parse/detect.js";
 import { parseFile, publicParseMeta } from "./parse/index.js";
 import { isBinaryContentType, looksLikeBinaryUrl } from "./parse/fetch.js";
 import { maxDownloadBytes } from "./parse/limits.js";
@@ -361,36 +364,40 @@ export function createLocalEngineClient(): LocalEngineBackend {
         };
       }
 
+      const parseDocument = async (resource: FetchedResource) => {
+        const parsed = await parseFile(
+          { bytes: resource.body, contentType: resource.contentType, fileName: resource.url },
+          { bypassCache: p.noCache }
+        );
+        return {
+          success: true,
+          mode: "local",
+          url: resource.url,
+          title: parsed.title,
+          markdown: parsed.markdown,
+          data: {
+            url: resource.url,
+            title: parsed.title,
+            markdown: parsed.markdown,
+            metadata: { parse: publicParseMeta(parsed) },
+          },
+          evidence: {
+            targetId: "pdf-office",
+            tier: parsed.meta.method === "ocr" ? "ocr" : "native-parser",
+            contentHash: parsed.contentHash,
+            latencyMs: Date.now() - start,
+            sourceUrl: resource.url,
+            matchedSignals: [`parse:${parsed.meta.kind}:${parsed.meta.method}`],
+            limitations: parsed.meta.warnings,
+          },
+        };
+      };
+
       // 2. Check if binary document URL (PDF, DOCX, XLSX, PPTX)
       if (looksLikeBinaryUrl(targetUrl)) {
         const fetched = await fetchResource(targetUrl, { maxBytes: maxDownloadBytes() });
         if (isBinaryContentType(fetched.contentType) || looksLikeBinaryUrl(fetched.url)) {
-          const parsed = await parseFile(
-            { bytes: fetched.body, contentType: fetched.contentType, fileName: fetched.url },
-            { bypassCache: p.noCache }
-          );
-          return {
-            success: true,
-            mode: "local",
-            url: fetched.url,
-            title: parsed.title,
-            markdown: parsed.markdown,
-            data: {
-              url: fetched.url,
-              title: parsed.title,
-              markdown: parsed.markdown,
-              metadata: { parse: publicParseMeta(parsed) },
-            },
-            evidence: {
-              targetId: "pdf-office",
-              tier: parsed.meta.method === "ocr" ? "ocr" : "native-parser",
-              contentHash: parsed.contentHash,
-              latencyMs: Date.now() - start,
-              sourceUrl: fetched.url,
-              matchedSignals: [`parse:${parsed.meta.kind}:${parsed.meta.method}`],
-              limitations: parsed.meta.warnings,
-            },
-          };
+          return parseDocument(fetched);
         }
       }
 
@@ -398,11 +405,12 @@ export function createLocalEngineClient(): LocalEngineBackend {
       if (!p.noCache) {
         const cached = await getCachedPageAsync(targetUrl, "none");
         // Entries written before blocked pages stopped being cached may hold a
-        // bot-check page: treat those as a miss and fetch again. Thin shells
+        // bot-check page or undecoded PDF bytes. Thin shells
         // (header-only JS pages) must also miss so local Chrome can hydrate them.
         if (
           cached &&
           !isChallengeMarkdown(cached.title, cached.markdown) &&
+          !cached.markdown.trimStart().startsWith("%PDF-") &&
           cached.markdown.trim().length >= MIN_CACHEABLE_MARKDOWN
         ) {
           const targetInspection = await inspectTarget({
@@ -478,7 +486,14 @@ export function createLocalEngineClient(): LocalEngineBackend {
         // ladder — the memo may be stale or the provider flaky.
       }
 
-      const fetched = await fetchWithTlsImpersonation(targetUrl);
+      const resource = await fetchTlsResource(targetUrl);
+      if (
+        resource.status >= 200 && resource.status < 300 &&
+        detectFileKind({ bytes: resource.body, contentType: resource.contentType }).kind === "pdf"
+      ) {
+        return parseDocument(resource);
+      }
+      const fetched = { status: resource.status, html: new TextDecoder().decode(resource.body) };
       const parsed = fastHtmlToMarkdown(fetched.html, targetUrl);
       let title = parsed.title;
       let markdown = parsed.markdown;
