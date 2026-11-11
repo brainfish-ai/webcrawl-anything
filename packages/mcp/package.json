@@ -25,7 +25,10 @@
     "claude-code",
     "cursor",
     "codex",
-    "ai-agents"
+    "ai-agents",
+    "firecrawl",
+    "firecrawl-alternative",
+    "open-source"
   ],
   "publishConfig": {
     "access": "public"
