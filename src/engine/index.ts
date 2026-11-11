@@ -10,4 +10,6 @@ export * from "./render.js";
 
 export * from "./chrome.js";
 
+export * from "./content-ready.js";
+
 export * from "./crawler.js";

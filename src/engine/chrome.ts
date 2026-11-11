@@ -3,7 +3,8 @@
  *
  * Primary driver is Chrome DevTools Protocol:
  * launch headless Chrome, navigate, wait until the DOM is content-ready
- * (load + 200ms mutation-idle), then read `documentElement.outerHTML`.
+ * (load + stable main-content text / mutation-idle, rejecting loading
+ * placeholders), then read `documentElement.outerHTML`.
  *
  * dump-dom is a last-resort fallback: Chrome 156 hangs on dump-dom with a
  * fresh profile, which used to look like a successful scrape of the

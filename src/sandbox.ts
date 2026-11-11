@@ -81,7 +81,14 @@ export async function escalateToSandboxOrBrowser(
           },
           body: JSON.stringify({
             url,
-            gotoOptions: { waitUntil: "domcontentloaded", timeout: options.timeoutMs ?? 15000 },
+            // networkidle2 waits until <=2 in-flight requests for ~500ms so
+            // late SPA fetches are more likely to finish before /markdown runs.
+            // Timer-driven fetches after a quiet shell still need the local
+            // Chrome content-ready wait (see engine/content-ready.ts).
+            gotoOptions: {
+              waitUntil: "networkidle2",
+              timeout: options.timeoutMs ?? 15000,
+            },
             rejectRequestPattern: [
               "^.*\\.(png|jpg|jpeg|gif|webp|svg|ico|woff2?|ttf|mp4|mp3|css)(\\?.*)?$",
               "^.*(googletagmanager|google-analytics|intercom|segment|hotjar|sentry).*$",

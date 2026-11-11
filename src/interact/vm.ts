@@ -10,6 +10,8 @@
  * Chromium in tests (set WC_PLAYWRIGHT / WC_CDP).
  */
 
+import { WAIT_FOR_CONTENT_READY_FN } from "../engine/content-ready.js";
+
 export const VM_ROOT = "/opt/wc";
 export const CDP_PORT = 9222;
 export const STEP_SCRIPT_PATH = `${VM_ROOT}/step.mjs`;
@@ -77,7 +79,9 @@ export const WAIT_FOR_CDP_SCRIPT = `for i in $(seq 1 50); do curl -sf http://127
  * Prints exactly one line: `WCRESULT {"ok":true,...}`.
  * Never throws: failures are reported as { ok: false, error }.
  */
-export const STEP_SCRIPT = String.raw`
+export const STEP_SCRIPT =
+  `const waitForContentReady = ${WAIT_FOR_CONTENT_READY_FN};\n` +
+  String.raw`
 const PW = process.env.WC_PLAYWRIGHT || "/opt/wc/node_modules/playwright/index.mjs";
 const CDP = process.env.WC_CDP || "http://127.0.0.1:9222";
 const { chromium } = await import(PW);
@@ -232,7 +236,14 @@ try {
           await page.waitForLoadState("load", { timeout: 2000 }).catch(() => {});
           await page.waitForTimeout(700);
         }
-        try { await page.waitForLoadState("networkidle", { timeout: 2500 }); } catch {}
+        // Prefer content stability over a short networkidle window so late SPA
+        // fetches (and timer-driven fetches after a quiet shell) are included.
+        const readyBudget = Math.max(500, Math.min(deadline - Date.now(), 10000));
+        if (readyBudget > 200) {
+          try { await page.evaluate(waitForContentReady, readyBudget); } catch {}
+        } else {
+          try { await page.waitForLoadState("networkidle", { timeout: 2500 }); } catch {}
+        }
         html = await page.content().catch(() => html);
         const blocked = looksBlocked(html);
         return { status: blocked ? navStatus : (navStatus && navStatus < 400 ? navStatus : 200), contentType: "text/html", body: html, finalUrl: page.url(), title: await page.title().catch(() => ""), blocked };

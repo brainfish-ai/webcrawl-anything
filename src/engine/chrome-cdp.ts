@@ -15,6 +15,10 @@ import {
   resolveChromeConnectTimeoutMs,
   type ChromeHeadlessMode,
 } from "./chrome-launch.js";
+import {
+  CONTENT_READY_MAX_WAIT_MS,
+  buildWaitForContentReadyExpression,
+} from "./content-ready.js";
 
 /** Chrome spawned but CDP never became ready. `hung` is true when the process was still alive. */
 export class ChromeConnectError extends Error {
@@ -60,51 +64,6 @@ const SNAPSHOT_JS = `(() => {
     textLen: text.length,
     readyState: document.readyState || "",
   };
-})()`;
-
-/** mutationIdle (200ms quiet) plus readyState complete, capped. */
-const WAIT_FOR_CONTENT_JS = `(async () => {
-  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-  const snap = () => {
-    const body = document.body;
-    const text = body && typeof body.innerText === "string" ? body.innerText.trim() : "";
-    return {
-      html: document.documentElement ? document.documentElement.outerHTML : "",
-      title: document.title || "",
-      textLen: text.length,
-      readyState: document.readyState || "",
-      elemCount: document.getElementsByTagName("*").length,
-    };
-  };
-  let lastMut = Date.now();
-  let observer = null;
-  try {
-    observer = new MutationObserver(() => { lastMut = Date.now(); });
-    if (document.documentElement) {
-      observer.observe(document.documentElement, {
-        subtree: true,
-        childList: true,
-        characterData: true,
-      });
-    }
-  } catch (_) { /* ignore */ }
-  const start = Date.now();
-  let last = snap();
-  while (Date.now() - start < 2500) {
-    await sleep(150);
-    const now = snap();
-    const quiet = Date.now() - lastMut >= 200;
-    const grown = now.elemCount > last.elemCount + 2 || now.textLen > last.textLen + 20;
-    last = now;
-    if (
-      now.readyState === "complete" &&
-      now.textLen >= 80 &&
-      quiet &&
-      !grown
-    ) break;
-  }
-  try { observer && observer.disconnect(); } catch (_) { /* ignore */ }
-  return last;
 })()`;
 
 function childStillRunning(child?: ChildProcess): boolean {
@@ -232,7 +191,15 @@ async function withCdpSession(
     } catch {
       /* take a snapshot anyway if navigation load times out */
     }
-    let snapshot = await evaluateSnapshot(client, WAIT_FOR_CONTENT_JS);
+    // Leave headroom for the final snapshot evaluate inside the page budget.
+    const readyBudget = Math.max(
+      1_500,
+      Math.min(CONTENT_READY_MAX_WAIT_MS, timeoutMs - 1_000)
+    );
+    let snapshot = await evaluateSnapshot(
+      client,
+      buildWaitForContentReadyExpression(readyBudget)
+    );
     if (!snapshot || snapshot.textLen < 40 || snapshot.html.length < 80) {
       snapshot = await evaluateSnapshot(client, SNAPSHOT_JS);
     }
