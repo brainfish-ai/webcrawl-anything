@@ -216,29 +216,26 @@ async function withCdpSession(
     );
     const deadline = Date.now() + readyBudget;
     let snapshot: CdpSnapshot | null = null;
-    // Client-side redirects (location.assign / replace) destroy the execution
-    // context mid-wait; retry on the new document until the budget expires.
+    // Client-side redirects destroy the execution context mid-wait. Retry only
+    // after an evaluate failure (not by racing loadEventFired, which can fire
+    // spuriously in CI and restart a healthy wait until the budget is gone).
     while (Date.now() < deadline) {
       const remaining = Math.max(400, deadline - Date.now());
       try {
-        const navigated = client
-          .waitForEvent("Page.loadEventFired", remaining)
-          .then(() => "nav" as const);
-        const waited = evaluateSnapshot(
+        snapshot = await evaluateSnapshot(
           client,
           buildWaitForContentReadyExpression(remaining)
-        ).then((s) => ({ kind: "snap" as const, s }));
-        const winner = await Promise.race([
-          waited,
-          navigated.then((kind) => ({ kind, s: null as CdpSnapshot | null })),
-        ]);
-        if (winner.kind === "nav") {
-          // New document is loading; loop and wait on it.
-          continue;
-        }
-        snapshot = winner.s;
+        );
         break;
       } catch {
+        try {
+          await client.waitForEvent(
+            "Page.loadEventFired",
+            Math.min(remaining, 5_000)
+          );
+        } catch {
+          /* take a snapshot on the current document anyway */
+        }
         await delay(120, signal).catch(() => {});
       }
     }

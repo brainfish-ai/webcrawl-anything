@@ -79,10 +79,12 @@ describe("content-ready edge cases", () => {
     try {
       // 1. Never settle
       for (const [variant, marker, maxMs] of [
-        ["clock", EDGE_MARKERS.clock, 14_000],
-        ["carousel", EDGE_MARKERS.carousel, 14_000],
-        ["animation", EDGE_MARKERS.animation, 14_000],
-        ["spinner-stay", EDGE_MARKERS.spinnerStay, 14_000],
+        // Tickers should settle early; sticky spinner may burn the ~10s cap.
+        // Leave headroom for cold Chrome start on CI runners.
+        ["clock", EDGE_MARKERS.clock, 8_000],
+        ["carousel", EDGE_MARKERS.carousel, 8_000],
+        ["animation", EDGE_MARKERS.animation, 8_000],
+        ["spinner-stay", EDGE_MARKERS.spinnerStay, 16_000],
       ] as const) {
         const t0 = Date.now();
         const out = await render(server.urlFor(variant));

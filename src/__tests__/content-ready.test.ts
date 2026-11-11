@@ -103,12 +103,12 @@ describe("SPA late-load Chrome readiness", () => {
         // Long / quiet-then-fetch must wait past the old ~2.5s networkidle cap.
         if (variant === "short") {
           assert.ok(
-            ms < 12_000,
+            ms < 16_000,
             `${variant} should settle after 1.5s fetch without hanging, took ${ms}ms`
           );
         } else {
           assert.ok(ms > 3_000, `${variant} finished too fast (${ms}ms)`);
-          assert.ok(ms < 14_000, `${variant} should not hang past the hard cap, took ${ms}ms`);
+          assert.ok(ms < 16_000, `${variant} should not hang past the hard cap, took ${ms}ms`);
         }
       }
     } finally {
