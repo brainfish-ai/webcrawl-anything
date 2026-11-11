@@ -137,7 +137,13 @@ export function isAntiBotChallenge(html: string, status: number): boolean {
   if (status === 403 || status === 429 || status === 503) {
     return true;
   }
-  const lower = html.slice(0, 6000).toLowerCase();
+  const raw = String(html ?? "");
+  // Reddit (and similar) hide this copy after tens of KB of CSS + a data-URI PNG.
+  if (/blocked by network security/i.test(raw)) {
+    return true;
+  }
+  // Head slice catches title/meta markers on ordinary challenge interstitials.
+  const lower = raw.slice(0, 8000).toLowerCase();
   if (
     lower.includes("cf-browser-verification") ||
     lower.includes("challenge-platform") ||
@@ -436,6 +442,15 @@ export async function fetchWithTlsImpersonation(
   url: string,
   timeoutMs = 12_000
 ): Promise<{ status: number; html: string; headers: Record<string, string> }> {
+  const { status, body, headers } = await fetchTlsResource(url, timeoutMs);
+  return { status, html: new TextDecoder().decode(body), headers };
+}
+
+/** Keeps the HTML transport's cookies and headers while retaining the original bytes. */
+export async function fetchTlsResource(
+  url: string,
+  timeoutMs = 12_000
+): Promise<FetchedResource> {
   // Session hydration: when a warm stealth session exists for this domain, its
   // solved cookies (and the UA they were solved under — bound cookies require
   // the pair) ride the request so the lightweight tier can skip the challenge.
@@ -469,8 +484,10 @@ export async function fetchWithTlsImpersonation(
   }
   return {
     status: res.status,
-    html: new TextDecoder().decode(res.body),
     headers: res.headers,
+    contentType: (res.headers["content-type"] || "").split(";")[0].trim().toLowerCase(),
+    body: new Uint8Array(res.body),
+    url: finalUrl,
   };
 }
 
@@ -547,20 +564,35 @@ export function needsBrowserEscalation(
   if (isAntiBotChallenge(html, status)) {
     return true;
   }
-  const lower = html.slice(0, 6000).toLowerCase();
+  const text = markdown.trim();
+  const lower = html.slice(0, 8000).toLowerCase();
+  // Empty or near-empty body: nothing to return until a renderer hydrates it.
+  if (text.length === 0) {
+    return true;
+  }
   // Empty SPA shell check (<div id="root"></div> or <div id="app"></div> with almost no text)
   if (
-    markdown.length < 120 &&
+    text.length < 200 &&
     (lower.includes('id="root"') ||
       lower.includes('id="app"') ||
-      lower.includes('id="__next"'))
+      lower.includes('id="__next"') ||
+      lower.includes('id="__nuxt"'))
+  ) {
+    return true;
+  }
+  // Header-only JS pages (quotes.toscrape.com/js): real content lives in a
+  // <script> as JSON + document.write / innerHTML, so markdown is just the chrome.
+  if (
+    text.length < 200 &&
+    /<script[\s>]/i.test(html) &&
+    /document\.write|innerHTML\s*=/i.test(html)
   ) {
     return true;
   }
   // Big-HTML/no-content SPA shell: a very large page (JS bundles / inline
   // state, e.g. StubHub category pages ~3MB) that yields almost no
   // extractable text is serving its real content client-side.
-  if (html.length > 250_000 && markdown.length < 500) {
+  if (html.length > 250_000 && text.length < 500) {
     return true;
   }
   return false;

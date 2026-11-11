@@ -1,9 +1,14 @@
 import assert from "node:assert/strict";
 import { mkdtempSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { describe, it } from "node:test";
 import { main } from "../src/index.js";
+
+const cliPackageVersion = JSON.parse(
+  readFileSync(join(dirname(fileURLToPath(import.meta.url)), "../package.json"), "utf8")
+).version as string;
 
 function setup(handler: (url: string, body?: Record<string, unknown>) => { status?: number; json: unknown } = () => ({ json: {} }), stdin = "") {
   const dir = mkdtempSync(join(tmpdir(), "wc-cli-"));
@@ -45,6 +50,24 @@ describe("webcrawl CLI", () => {
     assert.equal(t.out(), "# Hello\n");
   });
 
+  it("failed search prints the error and exits 1", async () => {
+    const t = setup(() => ({
+      json: { success: false, error: "Keyless search engines returned no results.", data: [] },
+    }));
+    assert.equal(await t.run(["search", "x"]), 1);
+    assert.equal(t.out(), "");
+    assert.match(t.err(), /Error: Keyless search engines returned no results/);
+  });
+
+  it("scrape of a blocked page prints the error and exits 1", async () => {
+    const t = setup(() => ({
+      json: { success: false, blocked: true, error: "Blocked by the site's bot check (HTTP 403).", data: { markdown: "" } },
+    }));
+    assert.equal(await t.run(["scrape", "https://a.com"]), 1);
+    assert.equal(t.out(), "");
+    assert.match(t.err(), /Error: Blocked by the site's bot check \(HTTP 403\)/);
+  });
+
   it("usage errors exit 2 without calling the API", async () => {
     const t = setup();
     assert.equal(await t.run(["search"]), 2);
@@ -60,6 +83,19 @@ describe("webcrawl CLI", () => {
     assert.equal(await t.run([]), 2);
     assert.equal(await t.run(["--help"]), 0);
     assert.match(t.out(), /Usage: webcrawl/);
+    assert.match(t.out(), /-v, --version/);
+  });
+
+  it("--version and -v print the installed package version and exit 0", async () => {
+    const t = setup();
+    assert.equal(await t.run(["--version"]), 0);
+    assert.equal(t.out().trim(), cliPackageVersion);
+    assert.equal(t.err(), "");
+    assert.match(cliPackageVersion, /^\d+\.\d+\.\d+/);
+    const t2 = setup();
+    assert.equal(await t2.run(["-v"]), 0);
+    assert.equal(t2.out().trim(), cliPackageVersion);
+    assert.equal(t2.err(), "");
   });
 
   it("API failures exit 1 with an actionable message", async () => {
@@ -82,6 +118,15 @@ describe("webcrawl CLI", () => {
     assert.equal(await t.run(["extract", "https://a.com", "--schema", p, "--prompt", "name"]), 0);
     assert.deepEqual(t.calls[0].body, { url: "https://a.com", prompt: "name", schema: { type: "object" } });
     assert.match(t.out(), /"name": "x"/);
+  });
+
+  it("failed extract prints the error and exits 1", async () => {
+    const t = setup(() => ({
+      json: { success: false, error: "Extraction produced no data matching the prompt/schema.", data: {} },
+    }));
+    assert.equal(await t.run(["extract", "https://a.com", "--prompt", "quotes"]), 1);
+    assert.equal(t.out(), "");
+    assert.match(t.err(), /Extraction produced no data matching the prompt\/schema/);
   });
 
   it("login saves the key at 0600 and later commands use it", async () => {

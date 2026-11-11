@@ -34,7 +34,7 @@ export type WebcrawlLikeClient = Pick<
 
 const INSTRUCTIONS = `Webcrawl Anything gives you live web & target inspection access (zero-key local engine or webcrawl.app cloud).
 - web_search: find pages or structured results. Set category for flights, hotels, real-estate, shopping, news, local business, security (CVEs), academic or tech. Results are localised to the user.
-- web_scrape: read one URL as clean markdown with target evidence (websites, SPAs, GitHub, ArXiv, llms.txt).
+- web_read: read one URL as clean markdown with target evidence (websites, SPAs, GitHub, ArXiv, llms.txt).
 - web_parse: read a PDF, Office file, YouTube video, image, or audio/video at a URL as markdown (OCR and transcripts included). For long files set background and poll web_parse_status.
 - web_map: list the URLs on a site before deciding what to scrape.
 - web_crawl: read several pages of one site (max 25).
@@ -106,7 +106,7 @@ export function createWebcrawlMcpServer(
           "Also fetch page markdown for each result (slower, more credits)"
         ),
       },
-      annotations: { readOnlyHint: true, openWorldHint: true },
+      annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
     },
     ({ query, category, subcategory, limit, country, city, sites, include_content }) =>
       run(async () => {
@@ -120,26 +120,33 @@ export function createWebcrawlMcpServer(
           sites,
           scrapeContent: include_content,
         });
+        if (res.success === false && typeof res.error === "string") {
+          throw new Error(formatSearch(res) + formatCredits(res));
+        }
         return formatSearch(res) + formatCredits(res);
       })
   );
 
   server.registerTool(
-    "web_scrape",
+    "web_read",
     {
-      title: "Scrape a page",
+      title: "Read a page",
       description: compact
         ? "Fetch one URL as clean markdown."
-        : "Fetch one URL and return its main content as markdown. Handles JavaScript-heavy and bot-protected pages.",
+        : "Fetch one URL and return its main content as markdown.",
       inputSchema: {
         url: z.string().url(),
         no_cache: desc(z.boolean().optional(), "Skip cached copy"),
       },
-      annotations: { readOnlyHint: true, openWorldHint: true },
+      annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
     },
     ({ url, no_cache }) =>
       run(async () => {
         const res = await client.scrape({ url, formats: ["markdown"], noCache: no_cache });
+        // Blocked pages: surface as a tool error (isError) instead of empty content.
+        if (res.success === false && typeof res.error === "string") {
+          throw new Error(formatScrape(res) + formatCredits(res));
+        }
         return formatScrape(res) + formatCredits(res);
       })
   );
@@ -161,7 +168,8 @@ export function createWebcrawlMcpServer(
           "Run as a background job for long files; returns a run id"
         ),
       },
-      annotations: { readOnlyHint: true, openWorldHint: true },
+      // Not read-only: `background` queues a stateful job. Additive, so not destructive.
+      annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: true },
     },
     ({ url, ocr, pages, language, background }) =>
       run(async () => {
@@ -176,7 +184,7 @@ export function createWebcrawlMcpServer(
       title: "Check a file read",
       description: "Check a background web_parse run and return its Markdown when it has finished.",
       inputSchema: { id: z.string().min(1) },
-      annotations: { readOnlyHint: true, openWorldHint: false },
+      annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
     },
     ({ id }) =>
       run(async () => {
@@ -204,7 +212,7 @@ export function createWebcrawlMcpServer(
         search: desc(z.string().optional(), "Only URLs matching this text"),
         limit: z.number().int().min(1).max(5000).optional(),
       },
-      annotations: { readOnlyHint: true, openWorldHint: true },
+      annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
     },
     ({ url, search, limit }) =>
       run(async () => {
@@ -224,7 +232,7 @@ export function createWebcrawlMcpServer(
         url: z.string().url(),
         max_pages: desc(z.number().int().min(1).max(25).optional(), "Default 5"),
       },
-      annotations: { readOnlyHint: true, openWorldHint: true },
+      annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
     },
     ({ url, max_pages }) =>
       run(async () => {
@@ -245,11 +253,14 @@ export function createWebcrawlMcpServer(
         prompt: z.string().optional(),
         schema: desc(z.record(z.string(), z.any()).optional(), "JSON Schema for the output"),
       },
-      annotations: { readOnlyHint: true, openWorldHint: true },
+      annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
     },
     ({ url, prompt, schema }) =>
       run(async () => {
         const res = await client.extract({ url, prompt, schema });
+        if (res.success === false && typeof res.error === "string") {
+          throw new Error(res.error + formatCredits(res));
+        }
         return JSON.stringify(res.data ?? res, null, 2) + formatCredits(res);
       })
   );
@@ -266,7 +277,7 @@ export function createWebcrawlMcpServer(
         documents: z.array(z.string()).min(1).max(200),
         top_k: z.number().int().min(1).optional(),
       },
-      annotations: { readOnlyHint: true, openWorldHint: false },
+      annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
     },
     ({ query, documents, top_k }) =>
       run(async () => {
@@ -316,7 +327,8 @@ export function createWebcrawlMcpServer(
         ),
         webhook_url: desc(z.string().url().optional(), "HTTPS webhook URL to POST when triggered"),
       },
-      annotations: { readOnlyHint: false, openWorldHint: true },
+      // Destructive: the `delete` action removes a monitor and its history.
+      annotations: { readOnlyHint: false, destructiveHint: true, openWorldHint: true },
     },
     ({
       action,
@@ -417,7 +429,7 @@ export function createWebcrawlMcpServer(
       title: "Search categories",
       description: "List the search categories, subcategories and filters web_search supports.",
       inputSchema: {},
-      annotations: { readOnlyHint: true, openWorldHint: false },
+      annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
     },
     () => run(async () => JSON.stringify(await client.categories(), null, 2))
   );

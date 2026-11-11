@@ -83,7 +83,7 @@ export const pdfOfficeTargetPlugin: CrawlTargetPlugin = {
   name: "PDFs & Office Documents (DOCX, XLSX, PPTX)",
   category: "documents",
   returns: "Page-numbered Markdown, tables, native text extraction, automatic OCR on scanned pages, and skipped-page diagnostics",
-  requirements: "Built-in @firecrawl/pdf-inspector, mammoth, and officeparser; optional OCR provider for scanned pages",
+  requirements: "Built-in PDF inspector, mammoth, and officeparser; optional OCR provider for scanned pages",
   examples: [
     "npx webcrawl scrape https://arxiv.org/pdf/1706.03762.pdf",
   ],

@@ -1,11 +1,66 @@
-# Webcrawl Anything
+<p align="center">
+  <a href="https://webcrawl.app"><img src="./docs/assets/logo.svg" alt="Webcrawl logo" width="96" height="96"></a>
+</p>
 
-**Crawl, search, and extract structured evidence from any website, SPA, PDF, Office file, YouTube video, GitHub repo, ArXiv paper, shopping offer, travel fare, or CVE advisory — from a single CLI and MCP server.**
+<h1 align="center">Webcrawl Anything</h1>
 
-[![npm version](https://img.shields.io/npm/v/webcrawl?color=0a0a0a)](https://www.npmjs.com/package/webcrawl)
-[![MCP Server](https://img.shields.io/npm/v/@webcrawl/mcp?label=%40webcrawl%2Fmcp&color=2563eb)](https://www.npmjs.com/package/@webcrawl/mcp)
-[![Cloud API](https://img.shields.io/badge/cloud-webcrawl.app-10b981)](https://webcrawl.app)
-[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](./LICENSE)
+<p align="center"><strong>Give your AI agent the whole web. Free, local, no API key.</strong></p>
+
+<p align="center">Search, scrape, map, crawl and monitor any website, SPA, PDF, YouTube video, GitHub repo, ArXiv paper, product page or CVE, from Claude Code, Cursor, Codex or your terminal.</p>
+
+<p align="center">
+  <a href="https://www.npmjs.com/package/webcrawl"><img src="https://img.shields.io/npm/v/webcrawl?color=0a0a0a" alt="npm version"></a>
+  <a href="https://www.npmjs.com/package/@webcrawl/mcp"><img src="https://img.shields.io/npm/v/@webcrawl/mcp?label=%40webcrawl%2Fmcp&color=2563eb" alt="MCP Server"></a>
+  <a href="https://www.npmjs.com/package/webcrawl"><img src="https://img.shields.io/npm/dm/webcrawl?color=10b981" alt="npm downloads"></a>
+  <a href="https://skills.sh/brainfish-ai/webcrawl-anything"><img src="https://skills.sh/b/brainfish-ai/webcrawl-anything" alt="skills.sh installs"></a>
+  <a href="https://github.com/brainfish-ai/webcrawl-anything/stargazers"><img src="https://img.shields.io/github/stars/brainfish-ai/webcrawl-anything?style=flat&color=f59e0b" alt="GitHub stars"></a>
+  <a href="./LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="License: MIT"></a>
+</p>
+
+<p align="center">
+  <img src="./docs/assets/demo.svg" alt="webcrawl CLI finding a CVE, mapping the Stripe webhook docs and reading a GitHub repo in about a second each, locally with no API key" width="820">
+</p>
+
+<sub>Every frame above is real output, recorded with <code>node scripts/record-demo.mjs</code>. No API key, no account.</sub>
+
+## Set up in one line
+
+```bash
+npx skills add brainfish-ai/webcrawl-anything
+```
+
+That installs all eight Webcrawl [Agent Skills](#agent-skills-any-coding-agent) into Claude Code, Cursor, Codex, Gemini, Windsurf or any agent that reads `SKILL.md`. Only want one? Pick it by name:
+
+```bash
+npx skills add brainfish-ai/webcrawl-anything --skill webcrawl-deal-watch
+```
+
+To also register the `@webcrawl/mcp` server, so your agent can call the crawl, search and monitor tools directly:
+
+```bash
+npx webcrawl setup
+```
+
+Restart your agent and paste one of these:
+
+```text
+Is CVE-2024-3094 in anything I depend on? Look it up, give me the CVSS score, CISA KEV
+status and fixed versions, then check my package-lock.json and link the evidence.
+```
+
+```text
+Map https://docs.stripe.com/webhooks, crawl every page under it into Markdown, and
+write me a one-page cheat sheet with the source URL under each section.
+```
+
+```text
+Watch https://news.ycombinator.com every hour and alert me when a story about MCP
+reaches the front page. Show me the monitor you created.
+```
+
+More reproducible prompts, each with the command it runs: **[docs/demos.md](./docs/demos.md)**.
+
+No agent? Use the CLI directly: `npx webcrawl search "react 19 compiler"`.
 
 ---
 
@@ -14,7 +69,7 @@
 | Target | Returns | Requirements |
 |---|---|---|
 | **Websites & JS SPAs** (`web`) | Clean Markdown, semantic headings, tables, code blocks, links, OpenGraph/JSON-LD, and SHA-256 content hashes | Zero-key local (`impit` TLS impersonation + local Chrome) or [`webcrawl.app`](https://webcrawl.app) cloud stealth browsers |
-| **PDF & Office Docs** (`pdf-office`) | Page-numbered Markdown, tables, slide notes, and automatic OCR on scanned PDF pages (`pagesOcr` + honest `pagesSkipped`) | Built-in (`@firecrawl/pdf-inspector`, `pdf-parse`, `mammoth`, `officeparser`, `tesseract.js`) |
+| **PDF & Office Docs** (`pdf-office`) | Page-numbered Markdown, tables, slide notes, and automatic OCR on scanned PDF pages (`pagesOcr` + honest `pagesSkipped`) | Built-in PDF inspector plus `pdf-parse`, `mammoth`, `officeparser`, and `tesseract.js` |
 | **YouTube & Media** (`youtube-media`) | Timestamped transcript Markdown, video title/channel/duration metadata, and spoken audio transcription | Built-in zero-key YouTube multi-client caption extractor; optional audio transcription provider for raw MP3/MP4 |
 | **Shopping & Products** (`shopping`) | Multi-retailer price comparison, currency-normalized offers, stock status, ratings, review counts, and shipping | Zero-key local HTML/JSON-LD product extractor (`-c shopping`); optional `SERPER_API_KEY` |
 | **Flights & Hotels** (`travel`) | Structured flight routes (`origin`, `destination`, `airline`, `stops`, `price`) and hotel nightly rates, stars, and guest ratings | Zero-key local search + schema.org extractor (`-c flights` / `-c hotels`) |
@@ -56,6 +111,12 @@ Install webcrawl's skills into Claude Code, Cursor, Codex, or any agent that sup
 
 ```bash
 npx skills add brainfish-ai/webcrawl-anything
+```
+
+Or install a single skill, for example the Black Friday price-drop watcher:
+
+```bash
+npx skills add brainfish-ai/webcrawl-anything --skill webcrawl-deal-watch
 ```
 
 | Skill | What it does |
@@ -116,16 +177,20 @@ Once `npx webcrawl setup` has registered the MCP server and skill, ask Claude Co
 
 ### Local Engine vs. [`webcrawl.app`](https://webcrawl.app) Cloud
 
-Webcrawl Anything uses the **exact same TypeScript engine (`src/`)** locally and in the hosted [`webcrawl.app`](https://webcrawl.app) cloud API. You can start with zero keys locally and upgrade to cloud with one command whenever you need managed stealth browsers or sub-50ms global cache hits:
+Webcrawl Anything uses the **exact same TypeScript engine (`src/`)** locally and in the hosted [`webcrawl.app`](https://webcrawl.app) cloud API. You can start with zero keys locally and upgrade to cloud with one command whenever you need managed browsers or sub-50ms global cache hits:
 
 | Capability | Open-Source Local (`--mode local`) | [`webcrawl.app`](https://webcrawl.app) Cloud (`--mode cloud`) |
 |---|---|---|
 | **API Key Required** | **None (Zero-Key)** | `WEBCRAWL_API_KEY` (`npx webcrawl login`) |
 | **Core Engine & Target Plugins** | 100% shared (`src/engine`, `src/targets`, `src/extract`) | 100% shared |
 | **PDF, Office, YouTube & CVE Parsers** | Built-in local execution | Hosted + background async workers (`/v1/runs/:id`) |
-| **Anti-Bot & Cloudflare Bypass** | Local `impit` TLS + local Chrome | Managed residential stealth browser fleet + Cloudflare rendering |
-| **Search Fan-Out** | Built-in DuckDuckGo/Bing + BYO keys | Managed multi-provider fan-out (Serper, Brave, Jina, Tavily) |
+| **JavaScript-heavy pages** | Local `impit` TLS + local Chrome | Managed browser fleet + Cloudflare rendering |
+| **Search Fan-Out** | Built-in DuckDuckGo/Bing plus optional API keys | Managed multi-provider fan-out |
 | **Global Content Cache** | Local in-memory LRU | Sub-50ms global SHA-256 content-addressed cache |
+
+### How the engine works
+
+Static pages never launch Chrome. JavaScript pages use a CDP-driven local Chrome session with a readiness wait, a hard timeout, and fallback flags. If rendering cannot happen, the scrape is `success: false` (`needsJs`). Extract strips script and style tags and supports nested schemas. Search fans out across keyless sources and fills up to `n`. See [docs/engine.md](./docs/engine.md).
 
 To connect your CLI and MCP server to [`webcrawl.app`](https://webcrawl.app) cloud:
 
@@ -172,11 +237,31 @@ Every community improvement to a target plugin (`src/targets/`), vertical extrac
 
 ---
 
+### Show your build
+
+Built something with webcrawl, like a price tracker, a docs corpus, a research agent, or a monitor that saved you a refresh? Open a [Show your build](https://github.com/brainfish-ai/webcrawl-anything/discussions/categories/show-and-tell) discussion with the prompt you used and a screenshot. We feature the best ones here and in release notes.
+
+Add the badge to your project:
+
+```markdown
+[![Built with webcrawl](https://img.shields.io/badge/built%20with-webcrawl-0a0a0a)](https://github.com/brainfish-ai/webcrawl-anything)
+```
+
+---
+
 ### Contributing a New Target or Extractor
 
 Want to add a new target (e.g., Reddit threads, Hacker News discussions, SEC EDGAR filings, npm/PyPI packages, or a regional real-estate/shopping portal)?
 
 See **[CONTRIBUTING.md](./CONTRIBUTING.md)** for the 3-step guide to registering a `CrawlTargetPlugin` in `src/targets/` with a fixture test in `src/__tests__/targets.test.ts`.
+
+New here? Start with a [good first issue](https://github.com/brainfish-ai/webcrawl-anything/issues?q=is%3Aopen+label%3A%22good+first+issue%22) or a [target plugin request](https://github.com/brainfish-ai/webcrawl-anything/issues?q=is%3Aopen+label%3Atarget-plugin).
+
+### Contributors
+
+Every merged PR is credited by name in the release notes.
+
+[![Contributors](https://contrib.rocks/image?repo=brainfish-ai/webcrawl-anything)](https://github.com/brainfish-ai/webcrawl-anything/graphs/contributors)
 
 ---
 

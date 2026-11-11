@@ -3,6 +3,7 @@ export type SearchEngineSource =
   | "google-shopping"
   | "brave-native"
   | "ddg-lite"
+  | "bing-rss"
   | "google-news-rss"
   | "wikipedia"
   | "hn-algolia"

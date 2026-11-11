@@ -21,6 +21,10 @@ import {
   extractLinksFromHtml,
   fastHtmlToMarkdown,
 } from "./markdown.js";
+import {
+  extractByPromptAndSchema,
+  hasCustomExtractRequest,
+} from "../extract/structured.js";
 
 export interface MapWebsiteOptions {
   /** Only crawl the exact root/target domain (default: true when includeSubdomains is false and selectedDomains is empty) */
@@ -634,8 +638,9 @@ export async function checkUrlsStatusBatch(
 }
 
 /**
- * Extracts structured `{ app_name, product_features }` (or custom JSON schema) from a URL.
- * Replaces `firecrawl.asyncExtract` in `website-extract.ts`.
+ * Extracts structured JSON from a URL.
+ * Honours `prompt` / `schema` when provided; otherwise falls back to
+ * `{ app_name, product_features }` from title and headings.
  */
 export async function extractWebsiteData(
   url: string,
@@ -646,14 +651,15 @@ export async function extractWebsiteData(
     bypassCache?: boolean;
     /** Already-extracted content (e.g. a parsed PDF); skips the HTML fetch and cache. */
     markdown?: string;
+    /** Source HTML when the caller already fetched the page (quote cards, JSON-LD). */
+    html?: string;
   } = {}
-): Promise<{
-  app_name: string;
-  product_features: string[];
+): Promise<Record<string, unknown> & {
   cached?: boolean;
   cacheLayer?: "memory" | "disk" | "postgres" | "miss";
 }> {
-  if (!options.bypassCache && !options.markdown) {
+  const custom = hasCustomExtractRequest(options.prompt, options.schema);
+  if (!custom && !options.bypassCache && !options.markdown) {
     const cachedPage = await getCachedPageAsync(url, "all");
     if (
       cachedPage?.structuredData &&
@@ -671,6 +677,7 @@ export async function extractWebsiteData(
 
   let title = "";
   let markdown = "";
+  let html = options.html ?? "";
   let links: string[] = [];
   const existingPage = !options.bypassCache && !options.markdown
     ? await getCachedPageAsync(url, "all")
@@ -695,17 +702,27 @@ export async function extractWebsiteData(
         text: () => r.text(),
       }))
     );
-    const html = await res.text();
+    html = await res.text();
     const parsed = fastHtmlToMarkdown(html, url);
     title = parsed.title;
     markdown = parsed.markdown;
     links = parsed.links;
   }
 
+  const cacheMeta = () => ({
+    cached: Boolean(existingPage),
+    cacheLayer: existingPage?.cacheLayer || ("miss" as const),
+  });
+
   // If OPENAI_API_KEY is available, use gpt-4o-mini for structured JSON extraction
   const apiKey = options.openaiApiKey || process.env.OPENAI_API_KEY;
   if (apiKey) {
     try {
+      const schemaHint = options.schema
+        ? `Return a JSON object matching this JSON Schema:\n${JSON.stringify(options.schema)}`
+        : options.prompt
+          ? `Return JSON that satisfies this request: ${options.prompt}`
+          : 'Extract the application/website name and a list of key product features as JSON: {"app_name": string, "product_features": string[]}.';
       const llmRes = await fetch("https://api.openai.com/v1/chat/completions", {
         method: "POST",
         headers: {
@@ -718,12 +735,11 @@ export async function extractWebsiteData(
           messages: [
             {
               role: "system",
-              content:
-                'Extract the application/website name and a list of key product features as JSON: {"app_name": string, "product_features": string[]}.',
+              content: schemaHint,
             },
             {
               role: "user",
-              content: `URL: ${url}\nTitle: ${title}\n\nContent:\n${markdown.slice(0, 12000)}`,
+              content: `${options.prompt ? `${options.prompt}\n\n` : ""}URL: ${url}\nTitle: ${title}\n\nContent:\n${markdown.slice(0, 12000)}`,
             },
           ],
           temperature: 0,
@@ -736,12 +752,17 @@ export async function extractWebsiteData(
         };
         const content = json.choices?.[0]?.message?.content;
         if (content) {
-          const parsed = JSON.parse(content);
-          if (parsed.app_name && Array.isArray(parsed.product_features)) {
-            const structuredResult = {
-              app_name: String(parsed.app_name),
-              product_features: parsed.product_features.map(String),
-            };
+          const parsed = JSON.parse(content) as Record<string, unknown>;
+          const usable = custom
+            ? parsed && typeof parsed === "object" && !Array.isArray(parsed)
+            : Boolean(parsed.app_name && Array.isArray(parsed.product_features));
+          if (usable) {
+            const structuredResult = custom
+              ? parsed
+              : {
+                  app_name: String(parsed.app_name),
+                  product_features: (parsed.product_features as unknown[]).map(String),
+                };
             setCachedPage(url, "all", {
               title,
               markdown,
@@ -750,17 +771,31 @@ export async function extractWebsiteData(
               statusCode: 200,
               contentHash: sha256(markdown),
             });
-            return {
-              ...structuredResult,
-              cached: Boolean(existingPage),
-              cacheLayer: existingPage?.cacheLayer || "miss",
-            };
+            return { ...structuredResult, ...cacheMeta() };
           }
         }
       }
     } catch {
       // Fall through to deterministic heuristic extraction
     }
+  }
+
+  if (custom) {
+    const shaped = extractByPromptAndSchema(html, markdown, options.prompt, options.schema);
+    if (shaped) {
+      setCachedPage(url, "all", {
+        title,
+        markdown,
+        links,
+        structuredData: shaped,
+        statusCode: 200,
+        contentHash: sha256(markdown),
+      });
+      return { ...shaped, ...cacheMeta() };
+    }
+    // Honour the caller's schema/prompt: never substitute the generic
+    // `{ app_name, product_features }` object when they asked for something else.
+    return { ...cacheMeta() };
   }
 
   // Deterministic fast extraction from Title, Meta Description, and H2/H3/List headings (<5ms)
@@ -816,8 +851,7 @@ export async function extractWebsiteData(
 
   return {
     ...structuredResult,
-    cached: Boolean(existingPage),
-    cacheLayer: existingPage?.cacheLayer || "miss",
+    ...cacheMeta(),
   };
 }
 
@@ -914,6 +948,9 @@ export interface CrawledPage {
 
 /** True for markdown converted from a bot-check page (old cache entries). */
 export function isChallengeMarkdown(title: string, markdown: string): boolean {
+  if (/blocked by network security/i.test(`${title}\n${markdown}`)) {
+    return true;
+  }
   const t = `${title}\n${markdown.slice(0, 600)}`.toLowerCase();
   return (
     t.includes("vercel security checkpoint") ||

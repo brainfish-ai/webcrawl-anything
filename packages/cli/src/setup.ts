@@ -72,7 +72,7 @@ Use **Webcrawl Anything** (\`webcrawl\` CLI or \`webcrawl\` MCP tools) whenever 
      - \`security\`: CVE / GHSA records with CVSS scores, CWEs, affected/fixed versions, and CISA KEV status.
      - \`academic\`: ArXiv and research papers.
      - \`tech\` / \`news\` / \`general\`: General and developer search.
-2. **Page & Developer Target Inspection (\`web_scrape\` / \`webcrawl scrape <url>\`)**:
+2. **Page & Developer Target Inspection (\`web_read\` / \`webcrawl scrape <url>\`)**:
    - Works on any website, client-rendered SPA, GitHub repository/issue/release, ArXiv abstract page, or \`llms.txt\` manifest.
 3. **Binary Documents & Media (\`web_parse\` / \`webcrawl scrape <pdf-or-youtube-url>\`)**:
    - Reads PDFs (native text + automatic OCR on scanned pages), Word (\`.docx\`), Excel (\`.xlsx\`), PowerPoint (\`.pptx\`), and YouTube URLs (timestamped transcripts).
@@ -207,19 +207,23 @@ export function runDoctor(
 
   // 3. Local Chrome / Stealth Browser availability
   const chromePaths = [
+    env.WEBCRAWL_CHROME_PATH,
+    env.INTERACT_CHROME_PATH,
     env.CHROME_PATH,
     "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
     "/usr/bin/google-chrome",
+    "/usr/bin/google-chrome-stable",
     "/usr/bin/chromium",
     "/usr/bin/chromium-browser",
+    "/snap/bin/chromium",
   ].filter(Boolean) as string[];
   const foundChrome = chromePaths.find((p) => existsSync(p));
   checks.push({
     name: "Local stealth browser",
     status: foundChrome ? "ok" : "optional",
     detail: foundChrome
-      ? `Found Chrome at ${foundChrome}`
-      : "No local Chrome binary detected; static/TLS fetch works out of the box, or run `webcrawl login` for cloud stealth browsers",
+      ? `Found Chrome at ${foundChrome} (used to render JS pages)`
+      : "No local Chrome binary detected; static pages still work. For JS pages install Chrome or `npx playwright install chromium-headless-shell`, or run `webcrawl login` for cloud stealth browsers",
   });
 
   // 4. Search providers
@@ -242,7 +246,7 @@ export function runDoctor(
   checks.push({
     name: "Document & Media parsers",
     status: "ok",
-    detail: "PDF (@firecrawl/pdf-inspector), Office (mammoth/officeparser), YouTube captions, NVD/OSV CVEs ready",
+    detail: "PDF inspector, Office (mammoth/officeparser), YouTube captions, NVD/OSV CVEs ready",
   });
 
   return { mode: effectiveMode, checks };

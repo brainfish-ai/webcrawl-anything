@@ -76,6 +76,7 @@ import {
   type SearchResultItem,
 } from "./catalog.js";
 import {
+  EMPTY_SEARCH_ERROR,
   fetchHedgedNativeFederation,
   fetchJinaSearch,
   fetchNvdByIds,
@@ -213,7 +214,9 @@ export async function searchWeb(req: SearchRequest): Promise<SearchResponse> {
   }
 
   const perEngineLimit = Math.min(Math.max(limit + 4, 8), 15);
-  const quorumTimeoutMs = req.rankOptions?.quorumTimeoutMs ?? 1500;
+  // Must outlast DDG/Brave impersonation (2200ms) so a slow SERP is not cut off
+  // after Wikipedia's 2 hits — the v1.4.3 keyless-search failure mode.
+  const quorumTimeoutMs = req.rankOptions?.quorumTimeoutMs ?? 2800;
 
   // Stage 1: Hedged Multi-Engine Native Federation
   const collectedOffers: ProductOffer[] = [];
@@ -406,7 +409,7 @@ export async function searchWeb(req: SearchRequest): Promise<SearchResponse> {
   };
   let ranked = await rankDocuments(localizedSearchQuery, rankCandidates, rankOpts);
 
-  // Thin result set after ranking and filtering: ask Jina once, then re-rank the combined pool.
+  // Thin result set after ranking and filtering: ask the keyed search provider once, then re-rank.
   const minResults = Math.min(3, limit);
   if (
     (!req.provider || req.provider === "auto") &&
@@ -921,32 +924,35 @@ export async function searchWeb(req: SearchRequest): Promise<SearchResponse> {
     };
   });
 
-  // Charge the fallback surcharge only when a Jina result actually reached the caller.
+  // Charge the fallback surcharge only when a keyed-provider result actually reached the caller.
   // An explicitly chosen provider is not a fallback.
   const usedJinaFallback =
     (!req.provider || req.provider === "auto") &&
     finalItems.some((item) => item.sources?.includes("jina"));
+  const engines = ranked.rankingMetrics.enginesContributing;
   const provider: SearchResponse["provider"] =
-    ranked.rankingMetrics.enginesContributing.length > 1
+    engines.length > 1
       ? "native-federated"
-      : ranked.rankingMetrics.enginesContributing.includes("serper")
+      : engines.includes("serper")
         ? "serper"
-        : ranked.rankingMetrics.enginesContributing.includes("jina")
+        : engines.includes("jina")
           ? "jina"
-          : ranked.rankingMetrics.enginesContributing.includes("brave-api") ||
-            ranked.rankingMetrics.enginesContributing.includes("brave-native")
-          ? "brave"
-          : "ddg-edge";
+          : engines.includes("brave-api") || engines.includes("brave-native")
+            ? "brave"
+            : engines.includes("ddg-lite")
+              ? "ddg-edge"
+              : "native-federated";
 
-  if (
+  const hasHits =
     finalItems.length > 0 ||
     (products && products.length > 0) ||
     (dedupedListings && dedupedListings.length > 0) ||
     (dedupedFlights && dedupedFlights.length > 0) ||
     (dedupedHotels && dedupedHotels.length > 0) ||
     (dedupedBusinesses && dedupedBusinesses.length > 0) ||
-    (dedupedCves && dedupedCves.length > 0)
-  ) {
+    (dedupedCves && dedupedCves.length > 0);
+
+  if (hasHits) {
     searchCache.set(cacheKey, {
       data: finalItems,
       ...(products ? { products } : {}),
@@ -960,6 +966,19 @@ export async function searchWeb(req: SearchRequest): Promise<SearchResponse> {
       rankingMetrics: ranked.rankingMetrics,
       expiresAt: Date.now() + SEARCH_CACHE_TTL_MS,
     });
+  }
+
+  if (!hasHits) {
+    return {
+      success: false,
+      data: [],
+      provider,
+      error: EMPTY_SEARCH_ERROR,
+      cached: false,
+      latencyMs: Math.round(performance.now() - start),
+      ...(hasGeo ? { userLocation } : {}),
+      rankingMetrics: ranked.rankingMetrics,
+    };
   }
 
   return {

@@ -1,9 +1,12 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
 import { describe, it } from "node:test";
+import { fileURLToPath } from "node:url";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { WebcrawlClient } from "@webcrawl/client";
-import { MAX_OUTPUT_CHARS, createServer } from "../src/index.js";
+import { LOCAL_ENGINE_LOAD_ERROR, MAX_OUTPUT_CHARS, createServer } from "../src/index.js";
 
 type Handler = (url: string, body: Record<string, unknown> | undefined) => { status?: number; json: unknown };
 
@@ -37,11 +40,26 @@ describe("webcrawl MCP server", () => {
       "web_monitor",
       "web_parse",
       "web_parse_status",
+      "web_read",
       "web_rerank",
-      "web_scrape",
       "web_search",
     ]);
     assert.match(client.getInstructions() ?? "", /web_search/);
+  });
+
+  // ChatGPT/Codex plugin review requires all three hints as explicit booleans on every tool.
+  it("declares explicit readOnly/destructive/openWorld hints on every tool", async () => {
+    const { client } = await connect(() => ({ json: {} }));
+    const { tools } = await client.listTools();
+    for (const t of tools) {
+      for (const hint of ["readOnlyHint", "destructiveHint", "openWorldHint"] as const) {
+        assert.equal(typeof t.annotations?.[hint], "boolean", `${t.name} is missing ${hint}`);
+      }
+      if (t.annotations?.readOnlyHint) assert.equal(t.annotations.destructiveHint, false, `${t.name}: read-only tools are not destructive`);
+    }
+    const byName = Object.fromEntries(tools.map((t) => [t.name, t.annotations]));
+    assert.equal(byName.web_parse?.readOnlyHint, false, "web_parse can queue a background job");
+    assert.equal(byName.web_monitor?.destructiveHint, true, "web_monitor can delete monitors");
   });
 
   it("web_search formats structured hotels and passes arguments through", async () => {
@@ -56,15 +74,36 @@ describe("webcrawl MCP server", () => {
     assert.deepEqual(calls[0].body?.filters, { sites: ["booking.com"] });
   });
 
-  it("web_scrape returns markdown with title", async () => {
+  it("web_search with success:false is a tool error", async () => {
+    const { client } = await connect(() => ({
+      json: { success: false, error: "Keyless search engines returned no results.", data: [] },
+    }));
+    const r = await client.callTool({ name: "web_search", arguments: { query: "x" } });
+    assert.equal(r.isError, true);
+    assert.match(text(r), /Keyless search engines returned no results/);
+  });
+
+  it("web_extract with success:false is a tool error", async () => {
+    const { client } = await connect(() => ({
+      json: { success: false, error: "Extraction produced no data matching the prompt/schema.", data: {} },
+    }));
+    const r = await client.callTool({
+      name: "web_extract",
+      arguments: { url: "https://a.com", prompt: "quotes" },
+    });
+    assert.equal(r.isError, true);
+    assert.match(text(r), /Extraction produced no data matching the prompt\/schema/);
+  });
+
+  it("web_read returns markdown with title", async () => {
     const { client } = await connect(() => ({ json: { data: { title: "Hi", markdown: "# body" } } }));
-    const r = await client.callTool({ name: "web_scrape", arguments: { url: "https://a.com" } });
+    const r = await client.callTool({ name: "web_read", arguments: { url: "https://a.com" } });
     assert.match(text(r), /^# Hi\n\n# body/);
   });
 
   it("caps oversized output", async () => {
     const { client } = await connect(() => ({ json: { markdown: "x".repeat(MAX_OUTPUT_CHARS * 2) } }));
-    const r = await client.callTool({ name: "web_scrape", arguments: { url: "https://a.com" } });
+    const r = await client.callTool({ name: "web_read", arguments: { url: "https://a.com" } });
     assert.ok(text(r).length < MAX_OUTPUT_CHARS + 100);
     assert.match(text(r), /\[truncated \d+ characters\]/);
   });
@@ -242,5 +281,13 @@ describe("webcrawl MCP server", () => {
 
     const deleted = await client.callTool({ name: "web_monitor", arguments: { action: "delete", id: "mon_42" } });
     assert.match(text(deleted), /Monitor deleted\./);
+  });
+
+  it("stdio binary never silently falls back to webcrawl.app", () => {
+    const bin = readFileSync(join(dirname(fileURLToPath(import.meta.url)), "../src/bin.ts"), "utf8");
+    assert.doesNotMatch(bin, /falling back to https:\/\/webcrawl\.app/);
+    assert.match(bin, /loadLocalEngineClient/);
+    assert.match(bin, /process\.exit\(1\)/);
+    assert.match(LOCAL_ENGINE_LOAD_ERROR, /Reinstall @webcrawl\/mcp/);
   });
 });

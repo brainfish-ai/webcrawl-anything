@@ -58,16 +58,52 @@ for (const file of files) {
   }
   fs.writeFileSync(file, JSON.stringify(pkg, null, 2) + "\n");
 }
+
+// Keep the MCP Registry metadata on the same version as the npm package it points at.
+const server = JSON.parse(fs.readFileSync("server.json", "utf8"));
+server.version = next;
+for (const p of server.packages ?? []) {
+  if (p.identifier === "@webcrawl/mcp") p.version = next;
+}
+fs.writeFileSync("server.json", JSON.stringify(server, null, 2) + "\n");
 process.stdout.write(next);
 ' "$BUMP")
 
 echo "→ Prepared release v${NEW_VERSION}"
 
+RELEASE_PATHS=(
+  package.json
+  package-lock.json
+  packages/client/package.json
+  packages/mcp/package.json
+  packages/cli/package.json
+  packages/curl-impersonate/package.json
+  server.json
+)
+
+# Keep package-lock.json in sync with the bumped workspace versions so npm
+# continues to link @webcrawl/* locally. Without this, `npm ci` / packed
+# installs look for the new version on the registry (ETARGET) before publish.
+if ! git diff --quiet -- package.json packages/*/package.json server.json; then
+  echo "→ Refreshing package-lock.json so @webcrawl/* stay workspace-linked"
+  npm install --package-lock-only --ignore-scripts --no-audit --no-fund
+  node -e '
+    const lock = JSON.parse(require("fs").readFileSync("package-lock.json", "utf8"));
+    const names = ["@webcrawl/client", "@webcrawl/mcp", "@webcrawl/curl-impersonate", "webcrawl"];
+    const missing = names.filter((name) => !lock.packages?.[`node_modules/${name}`]?.link);
+    if (missing.length) {
+      console.error("package-lock.json must workspace-link:", missing.join(", "));
+      process.exit(1);
+    }
+    console.log("→ Workspace links:", names.join(", "));
+  '
+fi
+
 npm run build:packages
 npm run test:packages
 
-if ! git diff --quiet package.json packages/client/package.json packages/mcp/package.json packages/cli/package.json; then
-  git add package.json packages/client/package.json packages/mcp/package.json packages/cli/package.json packages/curl-impersonate/package.json
+if ! git diff --quiet -- "${RELEASE_PATHS[@]}"; then
+  git add "${RELEASE_PATHS[@]}"
   git commit -m "chore(release): v${NEW_VERSION}"
 fi
 

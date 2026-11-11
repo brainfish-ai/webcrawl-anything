@@ -9,8 +9,8 @@ Thank you for helping build **Webcrawl Anything**! Because the open-source CLI (
 Requires **Node.js >= 20**.
 
 ```bash
-git clone https://github.com/brainfish-ai/webcrawl.git
-cd webcrawl
+git clone https://github.com/brainfish-ai/webcrawl-anything.git
+cd webcrawl-anything
 npm install
 
 # Run the core engine & target registry test suite
@@ -83,3 +83,17 @@ Add a fixture-based test in `src/__tests__/targets.test.ts` verifying:
 - `inspectTarget({ url, html })` extracts structured fields and populates `evidence.matchedSignals` and `evidence.limitations`.
 
 Run `npm test && npm run test:packages` before opening your Pull Request.
+
+---
+
+## Where to start
+
+- [`good first issue`](https://github.com/brainfish-ai/webcrawl-anything/issues?q=is%3Aopen+label%3A%22good+first+issue%22) issues are scoped to one file plus a test.
+- [`target-plugin`](https://github.com/brainfish-ai/webcrawl-anything/issues?q=is%3Aopen+label%3Atarget-plugin) issues ask for a new site. Comment "I'll take this" so nobody duplicates the work.
+- Found a site that breaks? Open a bug with the exact `npx webcrawl …` command and its output.
+
+## How you get credit
+
+- Your name and PR link go into the release notes for the version that ships your change (generated from merged PRs).
+- You appear in the README contributors grid automatically.
+- Built something with webcrawl? Post it in [Discussions › Show and tell](https://github.com/brainfish-ai/webcrawl-anything/discussions/categories/show-and-tell). The best builds get the `showcase` label and a spot in the README.

@@ -55,10 +55,13 @@ export function formatSearch(res: Rec): string {
         .join("\n")}`
     );
   }
-  return parts.length ? parts.join("\n\n") : "No results.";
+  if (parts.length) return parts.join("\n\n");
+  if (res.success === false && str(res.error)) return `Error: ${str(res.error)}`;
+  return "No results.";
 }
 
 export function formatScrape(res: Rec): string {
+  if (res.success === false && str(res.error)) {return `Error: ${str(res.error)}`;}
   const d = isRec(res.data) ? res.data : res;
   return str(d.markdown) || str(d.content) || "(no content returned)";
 }
