@@ -88,6 +88,58 @@ export interface ContentReadyOptions {
 }
 
 /**
+ * Page-side function returning the document HTML. Uses native `outerHTML`
+ * (correct escaping, void elements, attributes) and only splices in open
+ * shadow-root / same-origin iframe content, inside marker wrappers, when any
+ * exist. Shared by the readiness wait and the CDP fallback snapshot.
+ */
+export const SERIALIZE_DOC_FN = String.raw`() => {
+  const root = document.documentElement;
+  if (!root) return "";
+  const needsExpand = (el) => {
+    for (const n of [el, ...el.querySelectorAll("*")]) {
+      if (n.shadowRoot) return true;
+      if (n.tagName === "IFRAME") {
+        try { if (n.contentDocument && n.contentDocument.documentElement) return true; } catch (_) {}
+      }
+    }
+    return false;
+  };
+  if (!needsExpand(root)) return root.outerHTML;
+  const expand = (el) => {
+    const clone = el.cloneNode(true);
+    const orig = [el, ...el.querySelectorAll("*")];
+    const cl = [clone, ...clone.querySelectorAll("*")];
+    for (let i = 0; i < orig.length; i++) {
+      const o = orig[i];
+      const c = cl[i];
+      if (!c) continue;
+      if (o.shadowRoot) {
+        const w = document.createElement("div");
+        w.setAttribute("data-shadow-root", "");
+        for (const n of o.shadowRoot.childNodes) {
+          w.appendChild(n.nodeType === 1 ? expand(n) : n.cloneNode(true));
+        }
+        c.insertBefore(w, c.firstChild);
+      }
+      if (o.tagName === "IFRAME") {
+        try {
+          const d = o.contentDocument;
+          if (d && d.documentElement) {
+            const w = document.createElement("div");
+            w.setAttribute("data-iframe-content", "");
+            w.appendChild(expand(d.documentElement));
+            c.appendChild(w);
+          }
+        } catch (_) { /* cross-origin */ }
+      }
+    }
+    return clone;
+  };
+  return expand(root).outerHTML;
+}`;
+
+/**
  * Async function source evaluated inside the page (CDP Runtime.evaluate or
  * Playwright page.evaluate). Takes maxWaitMs as its sole argument.
  */
@@ -179,47 +231,12 @@ export const WAIT_FOR_CONTENT_READY_FN = String.raw`async (maxWaitMs) => {
     return false;
   };
 
-  const serializeNode = (node) => {
-    if (!node) return "";
-    if (node.nodeType === 3) return node.textContent || "";
-    if (node.nodeType === 8) return "";
-    if (node.nodeType !== 1) return "";
-    const tag = String(node.tagName || "").toLowerCase();
-    if (tag === "script" || tag === "style" || tag === "noscript") {
-      return node.outerHTML || "";
-    }
-    let attrs = "";
-    try {
-      for (const a of node.attributes || []) {
-        attrs += " " + a.name + "=\"" + String(a.value || "").replace(/"/g, "&quot;") + "\"";
-      }
-    } catch (_) { /* ignore */ }
-    let inner = "";
-    if (node.shadowRoot) {
-      for (const c of node.shadowRoot.childNodes) inner += serializeNode(c);
-    }
-    if (tag === "iframe") {
-      try {
-        const doc = node.contentDocument;
-        if (doc && doc.documentElement) inner += serializeNode(doc.documentElement);
-      } catch (_) { /* cross-origin */ }
-    }
-    for (const c of node.childNodes) inner += serializeNode(c);
-    return "<" + tag + attrs + ">" + inner + "</" + tag + ">";
-  };
-
   const snap = () => {
     const collected = collectTextAndCount();
     const loadingUi = hasVisibleLoadingUi(document);
     const pending = hasPendingMount();
-    let html = "";
-    try {
-      html = document.documentElement ? serializeNode(document.documentElement) : "";
-    } catch (_) {
-      html = document.documentElement ? document.documentElement.outerHTML : "";
-    }
     return {
-      html,
+      html: "",
       title: document.title || "",
       textLen: collected.text.length,
       readyState: document.readyState || "",
@@ -270,6 +287,12 @@ export const WAIT_FOR_CONTENT_READY_FN = String.raw`async (maxWaitMs) => {
       stableMs >= needStable
     ) break;
   }
+  // Serialize once at the end; polling only needs text length / element count.
+  let html = "";
+  try { html = (${SERIALIZE_DOC_FN})(); } catch (_) {
+    html = document.documentElement ? document.documentElement.outerHTML : "";
+  }
+  last.html = html;
   return last;
 }`;
 

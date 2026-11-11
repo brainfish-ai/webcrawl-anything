@@ -17,6 +17,7 @@ import {
 } from "./chrome-launch.js";
 import {
   CONTENT_READY_MAX_WAIT_MS,
+  SERIALIZE_DOC_FN,
   buildWaitForContentReadyExpression,
 } from "./content-ready.js";
 
@@ -56,34 +57,12 @@ type CdpMessage = {
 };
 
 const SNAPSHOT_JS = `(() => {
-  const serializeNode = (node) => {
-    if (!node) return "";
-    if (node.nodeType === 3) return node.textContent || "";
-    if (node.nodeType === 8) return "";
-    if (node.nodeType !== 1) return "";
-    const tag = String(node.tagName || "").toLowerCase();
-    if (tag === "script" || tag === "style" || tag === "noscript") return node.outerHTML || "";
-    let attrs = "";
-    try {
-      for (const a of node.attributes || []) {
-        attrs += " " + a.name + "=\\"" + String(a.value || "").replace(/"/g, "&quot;") + "\\"";
-      }
-    } catch (_) {}
-    let inner = "";
-    if (node.shadowRoot) {
-      for (const c of node.shadowRoot.childNodes) inner += serializeNode(c);
-    }
-    if (tag === "iframe") {
-      try {
-        const doc = node.contentDocument;
-        if (doc && doc.documentElement) inner += serializeNode(doc.documentElement);
-      } catch (_) {}
-    }
-    for (const c of node.childNodes) inner += serializeNode(c);
-    return "<" + tag + attrs + ">" + inner + "</" + tag + ">";
-  };
   const body = document.body;
   let text = body && typeof body.innerText === "string" ? body.innerText.trim() : "";
+  let html = "";
+  try { html = (${SERIALIZE_DOC_FN})(); } catch (_) {
+    html = document.documentElement ? document.documentElement.outerHTML : "";
+  }
   try {
     if (body) {
       for (const el of body.querySelectorAll("*")) {
@@ -98,7 +77,7 @@ const SNAPSHOT_JS = `(() => {
     }
   } catch (_) {}
   return {
-    html: document.documentElement ? serializeNode(document.documentElement) : "",
+    html,
     title: document.title || "",
     textLen: text.replace(/\\s+/g, " ").trim().length,
     readyState: document.readyState || "",

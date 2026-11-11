@@ -71,32 +71,40 @@ export async function escalateToSandboxOrBrowser(
   const cfApiToken = process.env.CF_API_TOKEN;
   if (cfAccountId && cfApiToken) {
     try {
-      const cfRes = await fetch(
-        `https://api.cloudflare.com/client/v4/accounts/${cfAccountId}/browser-rendering/markdown`,
-        {
-          method: "POST",
-          headers: {
-            Authorization: `Bearer ${cfApiToken}`,
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
-            url,
-            // networkidle2 waits until <=2 in-flight requests for ~500ms so
-            // late SPA fetches are more likely to finish before /markdown runs.
-            // Timer-driven fetches after a quiet shell still need the local
-            // Chrome content-ready wait (see engine/content-ready.ts).
-            gotoOptions: {
-              waitUntil: "networkidle2",
-              timeout: options.timeoutMs ?? 15000,
+      const totalMs = options.timeoutMs ?? 15000;
+      const cfCall = (waitUntil: "networkidle2" | "domcontentloaded", ms: number) =>
+        fetch(
+          `https://api.cloudflare.com/client/v4/accounts/${cfAccountId}/browser-rendering/markdown`,
+          {
+            method: "POST",
+            headers: {
+              Authorization: `Bearer ${cfApiToken}`,
+              "Content-Type": "application/json",
             },
-            rejectRequestPattern: [
-              "^.*\\.(png|jpg|jpeg|gif|webp|svg|ico|woff2?|ttf|mp4|mp3|css)(\\?.*)?$",
-              "^.*(googletagmanager|google-analytics|intercom|segment|hotjar|sentry).*$",
-            ],
-          }),
-          signal: AbortSignal.timeout(options.timeoutMs ?? 15000),
-        }
-      );
+            body: JSON.stringify({
+              url,
+              gotoOptions: { waitUntil, timeout: ms },
+              rejectRequestPattern: [
+                "^.*\\.(png|jpg|jpeg|gif|webp|svg|ico|woff2?|ttf|mp4|mp3|css)(\\?.*)?$",
+                "^.*(googletagmanager|google-analytics|intercom|segment|hotjar|sentry).*$",
+              ],
+            }),
+            signal: AbortSignal.timeout(ms + 1000),
+          }
+        );
+      // networkidle2 catches late SPA fetches, but pages with long-polling or
+      // websockets never go idle. Give it ~60% of the budget, then fall back
+      // to domcontentloaded so those pages still succeed.
+      const idleMs = Math.floor(totalMs * 0.6);
+      let cfRes: Response | null = null;
+      try {
+        cfRes = await cfCall("networkidle2", idleMs);
+      } catch {
+        cfRes = null;
+      }
+      if (!cfRes || !cfRes.ok) {
+        cfRes = await cfCall("domcontentloaded", Math.max(3000, totalMs - idleMs));
+      }
 
       if (cfRes.ok) {
         const payload = (await cfRes.json()) as { success?: boolean; result?: string };

@@ -93,15 +93,11 @@ setInterval(() => {}, 60_000);
           ),
         out.error
       );
-      assert.match(
-        String(out.error),
-        /did not respond over CDP within \d+ms|Chrome CDP failed to start|timed out|aborted/i
-      );
+      assert.match(String(out.error), /did not respond over CDP within \d+ms/);
       assert.ok(ms < 12_000, `hang should die in a few seconds with default timeouts, took ${ms}ms`);
       assert.ok(out.attempts.length >= 1);
       assert.equal(out.attempts.every((a) => a.ok === false), true);
-      // dump-dom is skipped when a CDP attempt reports a hung connect.
-      // If the stub dies before hung is detected, dump-dom may still run.
+      assert.equal(out.attempts.some((a) => a.method.includes("dump-dom")), false);
       assert.ok(
         out.attempts.every((a) => a.ms < 6_000),
         JSON.stringify(out.attempts)
