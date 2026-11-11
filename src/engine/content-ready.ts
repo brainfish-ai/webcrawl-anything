@@ -5,15 +5,23 @@
  * path. Static (non-JS) fetch is unaffected.
  *
  * Strategy after document load:
- *   1. Poll main-content text length and DOM mutation activity.
- *   2. Treat loading placeholders, skeleton/spinner markers, and near-empty
- *      bodies as not ready.
+ *   1. Poll main-content text length and DOM size (including open shadow
+ *      roots; same-origin iframes when readable).
+ *   2. Treat visible loading placeholders / skeleton UI as not ready, but
+ *      allow legitimately tiny pages and real articles that merely mention
+ *      "loading".
  *   3. Return once content is stable for a short window (~500ms), or when
- *      the hard overall cap is hit so fast pages stay fast.
+ *      the hard overall cap is hit so never-settling pages cannot hang.
  */
 
 /** How long main content must stay unchanged before we call it ready. */
 export const CONTENT_STABLE_MS = 500;
+
+/**
+ * After content has grown at least once, require a longer quiet window so
+ * staggered chunk fetches (e.g. 1s apart) are not cut off mid-stream.
+ */
+export const CONTENT_STABLE_AFTER_GROWTH_MS = 1_500;
 
 /** Poll interval while waiting for content to settle. */
 export const CONTENT_POLL_MS = 120;
@@ -25,43 +33,40 @@ export const CONTENT_POLL_MS = 120;
  */
 export const CONTENT_READY_MAX_WAIT_MS = 10_000;
 
-/** Below this trimmed body text length, content is treated as not ready. */
+/** Soft floor: short pages without loading UI may still be ready. */
 export const CONTENT_MIN_TEXT_LEN = 40;
 
-/** Meaningful growth thresholds (ignore tiny spinner tick updates). */
-export const CONTENT_TEXT_GROWTH = 20;
-export const CONTENT_ELEM_GROWTH = 2;
+/** Meaningful growth thresholds (ignore tiny clock/ticker updates). */
+export const CONTENT_TEXT_GROWTH = 24;
+export const CONTENT_ELEM_GROWTH = 3;
 
 const LOADING_ONLY_RE =
   /^(loading|please wait|spinner|skeleton|fetching|coming soon)([\s.…!]*)$/i;
 
+/** UI-ish phrases only; bare "loading" in prose must not match. */
 const LOADING_PHRASE_RE =
-  /\b(loading(\s+(please\s+)?wait)?|please\s+wait|fetching(\s+data)?|content\s+is\s+loading|still\s+loading)\b/i;
+  /\b(please\s+wait|still\s+loading|content\s+is\s+loading|loading\s+(please\s+)?wait|loading\s+your\s+\w+|fetching(\s+data)?|loading\.\.\.|loading…)\b/i;
 
-const SKELETON_ATTR_RE =
-  /\b(skeleton|spinner|loading-spinner|animate-pulse|aria-busy\s*=\s*["']true["']|data-loading\s*=\s*["']true["']|role\s*=\s*["']progressbar["'])\b/i;
+const LOADING_UI_SELECTOR =
+  '[aria-busy="true"], [data-loading="true"], [role="progressbar"], .skeleton, .spinner, .loading-spinner, .animate-pulse';
 
 /**
- * True when visible text / markup still looks like a loading shell rather
- * than real page content. Exported for unit tests and callers that inspect
- * a snapshot without running the browser wait loop.
+ * True when visible text still looks like a loading shell rather than real
+ * page content. Exported for unit tests. `hasVisibleLoadingUi` should reflect
+ * whether a visible skeleton/spinner is present in the live DOM.
  */
 export function looksLikeLoadingPlaceholder(
   text: string,
-  html = "",
-  opts: { minTextLen?: number } = {}
+  opts: { minTextLen?: number; hasVisibleLoadingUi?: boolean } = {}
 ): boolean {
   const minTextLen = opts.minTextLen ?? CONTENT_MIN_TEXT_LEN;
   const trimmed = String(text || "").replace(/\s+/g, " ").trim();
-  if (trimmed.length < minTextLen) return true;
   if (LOADING_ONLY_RE.test(trimmed)) return true;
-
+  if (opts.hasVisibleLoadingUi && trimmed.length < 240) return true;
   // Short shells that are mostly a loading phrase are not ready yet.
   if (trimmed.length < 160 && LOADING_PHRASE_RE.test(trimmed)) return true;
-
-  // Skeleton / spinner markup with little real text.
-  if (trimmed.length < 240 && SKELETON_ATTR_RE.test(String(html || ""))) return true;
-
+  // Near-empty with an active loading UI is not ready; bare tiny pages are OK.
+  if (trimmed.length < minTextLen && opts.hasVisibleLoadingUi) return true;
   return false;
 }
 
@@ -88,51 +93,148 @@ export interface ContentReadyOptions {
  */
 export const WAIT_FOR_CONTENT_READY_FN = String.raw`async (maxWaitMs) => {
   const STABLE_MS = 500;
+  const STABLE_AFTER_GROWTH_MS = 1500;
   const POLL_MS = 120;
   const MIN_TEXT = 40;
-  const TEXT_GROWTH = 20;
-  const ELEM_GROWTH = 2;
+  const TEXT_GROWTH = 24;
+  const ELEM_GROWTH = 3;
   const loadingOnly = /^(loading|please wait|spinner|skeleton|fetching|coming soon)([\s.…!]*)$/i;
-  const loadingPhrase = /\b(loading(\s+(please\s+)?wait)?|please\s+wait|fetching(\s+data)?|content\s+is\s+loading|still\s+loading)\b/i;
-  // Only inspect the live document shell for skeleton markers, not inline
-  // script source that may mention "spinner" as a string.
-  const skeletonAttr = /\b(skeleton|spinner|loading-spinner|animate-pulse|aria-busy\s*=\s*["']true["']|data-loading\s*=\s*["']true["']|role\s*=\s*["']progressbar["'])\b/i;
+  const loadingPhrase = /\b(please\s+wait|still\s+loading|content\s+is\s+loading|loading\s+(please\s+)?wait|loading\s+your\s+\w+|fetching(\s+data)?|loading\.\.\.|loading…)\b/i;
+  const uiSelector = '[aria-busy="true"], [data-loading="true"], [role="progressbar"], .skeleton, .spinner, .loading-spinner, .animate-pulse';
   const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-  const shellHtml = () => {
+
+  const isVisible = (el) => {
     try {
-      const clone = document.documentElement.cloneNode(true);
-      for (const s of clone.querySelectorAll("script, style, noscript")) s.remove();
-      return clone.outerHTML || "";
-    } catch (_) {
-      return document.body ? document.body.innerHTML : "";
-    }
+      if (!el || el.hidden || el.getAttribute("aria-hidden") === "true") return false;
+      const st = window.getComputedStyle(el);
+      if (!st || st.display === "none" || st.visibility === "hidden" || Number(st.opacity) === 0) return false;
+      return true;
+    } catch (_) { return false; }
   };
-  const isLoading = (text, html) => {
-    const trimmed = String(text || "").replace(/\s+/g, " ").trim();
-    if (trimmed.length < MIN_TEXT) return true;
-    if (loadingOnly.test(trimmed)) return true;
-    if (trimmed.length < 160 && loadingPhrase.test(trimmed)) return true;
-    if (trimmed.length < 240 && skeletonAttr.test(String(html || ""))) return true;
+
+  const hasVisibleLoadingUi = (root) => {
+    try {
+      const nodes = (root || document).querySelectorAll(uiSelector);
+      for (const n of nodes) if (isVisible(n)) return true;
+    } catch (_) { /* ignore */ }
     return false;
   };
+
+  const collectTextAndCount = () => {
+    // Prefer native innerText / getElementsByTagName for light DOM (fast on
+    // huge pages), then pierce open shadow roots and same-origin iframes.
+    let text = document.body && typeof document.body.innerText === "string"
+      ? document.body.innerText.trim()
+      : "";
+    let count = document.getElementsByTagName("*").length;
+    const pierce = (root) => {
+      let hosts;
+      try { hosts = root.querySelectorAll("*"); } catch (_) { return; }
+      for (const el of hosts) {
+        if (el.shadowRoot) {
+          try { count += el.shadowRoot.querySelectorAll("*").length; } catch (_) {}
+          try {
+            const st = el.shadowRoot.textContent || "";
+            if (st.trim()) text += " " + st.trim();
+          } catch (_) {}
+          pierce(el.shadowRoot);
+        }
+        if (String(el.tagName || "").toUpperCase() === "IFRAME") {
+          try {
+            const doc = el.contentDocument;
+            if (doc && doc.body) {
+              count += doc.getElementsByTagName("*").length;
+              const it = doc.body.innerText || "";
+              if (it.trim()) text += " " + it.trim();
+            }
+          } catch (_) { /* cross-origin */ }
+        }
+      }
+    };
+    try { if (document.body) pierce(document.body); } catch (_) {}
+    return {
+      text: text.replace(/\s+/g, " ").trim(),
+      elemCount: count,
+    };
+  };
+
+  const isLoading = (text, loadingUi) => {
+    const trimmed = String(text || "").replace(/\s+/g, " ").trim();
+    if (loadingOnly.test(trimmed)) return true;
+    if (loadingUi && trimmed.length < 240) return true;
+    if (trimmed.length < 160 && loadingPhrase.test(trimmed)) return true;
+    if (trimmed.length < MIN_TEXT && loadingUi) return true;
+    return false;
+  };
+
+  const hasPendingMount = () => {
+    try {
+      // Explicit "still expecting content" marker (e.g. streamed chunks).
+      if (document.querySelector("[data-expect-content]")) return true;
+      // Empty content slots mean a SPA is still expecting hydration/chunks.
+      if (document.querySelector("#chunks:empty, #content:empty, #app:empty, #root:empty")) {
+        return true;
+      }
+    } catch (_) { /* ignore */ }
+    return false;
+  };
+
+  const serializeNode = (node) => {
+    if (!node) return "";
+    if (node.nodeType === 3) return node.textContent || "";
+    if (node.nodeType === 8) return "";
+    if (node.nodeType !== 1) return "";
+    const tag = String(node.tagName || "").toLowerCase();
+    if (tag === "script" || tag === "style" || tag === "noscript") {
+      return node.outerHTML || "";
+    }
+    let attrs = "";
+    try {
+      for (const a of node.attributes || []) {
+        attrs += " " + a.name + "=\"" + String(a.value || "").replace(/"/g, "&quot;") + "\"";
+      }
+    } catch (_) { /* ignore */ }
+    let inner = "";
+    if (node.shadowRoot) {
+      for (const c of node.shadowRoot.childNodes) inner += serializeNode(c);
+    }
+    if (tag === "iframe") {
+      try {
+        const doc = node.contentDocument;
+        if (doc && doc.documentElement) inner += serializeNode(doc.documentElement);
+      } catch (_) { /* cross-origin */ }
+    }
+    for (const c of node.childNodes) inner += serializeNode(c);
+    return "<" + tag + attrs + ">" + inner + "</" + tag + ">";
+  };
+
   const snap = () => {
-    const body = document.body;
-    const text = body && typeof body.innerText === "string" ? body.innerText.trim() : "";
-    const html = document.documentElement ? document.documentElement.outerHTML : "";
-    const shell = shellHtml();
+    const collected = collectTextAndCount();
+    const loadingUi = hasVisibleLoadingUi(document);
+    const pending = hasPendingMount();
+    let html = "";
+    try {
+      html = document.documentElement ? serializeNode(document.documentElement) : "";
+    } catch (_) {
+      html = document.documentElement ? document.documentElement.outerHTML : "";
+    }
     return {
       html,
       title: document.title || "",
-      textLen: text.length,
+      textLen: collected.text.length,
       readyState: document.readyState || "",
-      elemCount: document.getElementsByTagName("*").length,
-      loading: isLoading(text, shell),
+      elemCount: collected.elemCount,
+      loading: isLoading(collected.text, loadingUi) || pending,
+      loadingUi,
+      pending,
     };
   };
+
   const budget = Math.max(500, Math.min(Number(maxWaitMs) || 10000, 20000));
   const start = Date.now();
   let last = snap();
   let stableMs = 0;
+  let sawGrowth = false;
   while (Date.now() - start < budget) {
     await sleep(POLL_MS);
     const now = snap();
@@ -140,14 +242,32 @@ export const WAIT_FOR_CONTENT_READY_FN = String.raw`async (maxWaitMs) => {
       now.elemCount > last.elemCount + ELEM_GROWTH ||
       now.textLen > last.textLen + TEXT_GROWTH ||
       now.textLen + TEXT_GROWTH < last.textLen;
+    // Treat the loading→ready transition as growth so the first hydrated
+    // chunk (or SPA paint) gets the longer post-growth quiet window.
+    if (grown || (last.loading && !now.loading)) sawGrowth = true;
     if (now.loading || grown) stableMs = 0;
     else stableMs += POLL_MS;
     last = now;
+    // Ready when stable and either we have enough text, or a tiny finished
+    // page with no loading UI and no empty content mounts (404 / OK / image).
+    let hasMedia = false;
+    try {
+      hasMedia = Boolean(
+        document.querySelector("img[src], img[alt], video, svg, canvas, picture")
+      );
+    } catch (_) { /* ignore */ }
+    const tinyDone =
+      !now.loading &&
+      !now.loadingUi &&
+      !now.pending &&
+      now.textLen < MIN_TEXT &&
+      (now.textLen > 0 || hasMedia);
+    const enough = now.textLen >= MIN_TEXT && !now.loading;
+    const needStable = sawGrowth ? STABLE_AFTER_GROWTH_MS : STABLE_MS;
     if (
       now.readyState === "complete" &&
-      !now.loading &&
-      now.textLen >= MIN_TEXT &&
-      stableMs >= STABLE_MS
+      (enough || tinyDone) &&
+      stableMs >= needStable
     ) break;
   }
   return last;
@@ -173,17 +293,20 @@ export function isContentReadySnapshot(
     quietMs: number;
     stableMs: number;
     minTextLen?: number;
+    loadingUi?: boolean;
   }
 ): boolean {
   const minTextLen = opts.minTextLen ?? CONTENT_MIN_TEXT_LEN;
   if (snap.readyState !== "complete") return false;
   if (snap.loading) return false;
-  if (snap.textLen < minTextLen) return false;
   if (opts.quietMs < opts.stableMs) return false;
   if (!prev) return false;
   const grown =
     snap.elemCount > prev.elemCount + CONTENT_ELEM_GROWTH ||
     snap.textLen > prev.textLen + CONTENT_TEXT_GROWTH ||
     snap.textLen + CONTENT_TEXT_GROWTH < prev.textLen;
-  return !grown;
+  if (grown) return false;
+  if (snap.textLen >= minTextLen) return true;
+  // Tiny finished page: allow when there is no loading UI.
+  return opts.loadingUi !== true;
 }

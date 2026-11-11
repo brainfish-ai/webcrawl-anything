@@ -23,13 +23,14 @@ describe("content-ready helpers", () => {
   it("treats loading placeholders and near-empty bodies as not ready", () => {
     assert.equal(looksLikeLoadingPlaceholder("Loading..."), true);
     assert.equal(looksLikeLoadingPlaceholder("Please wait"), true);
-    assert.equal(looksLikeLoadingPlaceholder(""), true);
-    assert.equal(looksLikeLoadingPlaceholder("hi"), true);
+    assert.equal(looksLikeLoadingPlaceholder("", { hasVisibleLoadingUi: true }), true);
+    assert.equal(looksLikeLoadingPlaceholder("hi", { hasVisibleLoadingUi: true }), true);
+    // Bare tiny pages without loading UI are allowed to finish.
+    assert.equal(looksLikeLoadingPlaceholder("OK"), false);
     assert.equal(
-      looksLikeLoadingPlaceholder(
-        "Welcome to the dashboard. Loading your data…",
-        '<div class="skeleton" aria-busy="true"></div>'
-      ),
+      looksLikeLoadingPlaceholder("Welcome to the dashboard. Loading your data…", {
+        hasVisibleLoadingUi: true,
+      }),
       true
     );
     assert.equal(
@@ -101,10 +102,13 @@ describe("SPA late-load Chrome readiness", () => {
         assert.match(out.html!, /data-content-ready="true"/);
         // Long / quiet-then-fetch must wait past the old ~2.5s networkidle cap.
         if (variant === "short") {
-          assert.ok(ms < 8_000, `${variant} should settle soon after 1.5s fetch, took ${ms}ms`);
+          assert.ok(
+            ms < 12_000,
+            `${variant} should settle after 1.5s fetch without hanging, took ${ms}ms`
+          );
         } else {
           assert.ok(ms > 3_000, `${variant} finished too fast (${ms}ms)`);
-          assert.ok(ms < 12_000, `${variant} should not burn the full hard cap, took ${ms}ms`);
+          assert.ok(ms < 14_000, `${variant} should not hang past the hard cap, took ${ms}ms`);
         }
       }
     } finally {

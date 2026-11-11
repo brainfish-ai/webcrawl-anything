@@ -56,12 +56,51 @@ type CdpMessage = {
 };
 
 const SNAPSHOT_JS = `(() => {
+  const serializeNode = (node) => {
+    if (!node) return "";
+    if (node.nodeType === 3) return node.textContent || "";
+    if (node.nodeType === 8) return "";
+    if (node.nodeType !== 1) return "";
+    const tag = String(node.tagName || "").toLowerCase();
+    if (tag === "script" || tag === "style" || tag === "noscript") return node.outerHTML || "";
+    let attrs = "";
+    try {
+      for (const a of node.attributes || []) {
+        attrs += " " + a.name + "=\\"" + String(a.value || "").replace(/"/g, "&quot;") + "\\"";
+      }
+    } catch (_) {}
+    let inner = "";
+    if (node.shadowRoot) {
+      for (const c of node.shadowRoot.childNodes) inner += serializeNode(c);
+    }
+    if (tag === "iframe") {
+      try {
+        const doc = node.contentDocument;
+        if (doc && doc.documentElement) inner += serializeNode(doc.documentElement);
+      } catch (_) {}
+    }
+    for (const c of node.childNodes) inner += serializeNode(c);
+    return "<" + tag + attrs + ">" + inner + "</" + tag + ">";
+  };
   const body = document.body;
-  const text = body && typeof body.innerText === "string" ? body.innerText.trim() : "";
+  let text = body && typeof body.innerText === "string" ? body.innerText.trim() : "";
+  try {
+    if (body) {
+      for (const el of body.querySelectorAll("*")) {
+        if (el.shadowRoot) text += " " + (el.shadowRoot.textContent || "");
+        if (String(el.tagName || "").toUpperCase() === "IFRAME") {
+          try {
+            const doc = el.contentDocument;
+            if (doc && doc.body) text += " " + (doc.body.innerText || "");
+          } catch (_) {}
+        }
+      }
+    }
+  } catch (_) {}
   return {
-    html: document.documentElement ? document.documentElement.outerHTML : "",
+    html: document.documentElement ? serializeNode(document.documentElement) : "",
     title: document.title || "",
-    textLen: text.length,
+    textLen: text.replace(/\\s+/g, " ").trim().length,
     readyState: document.readyState || "",
   };
 })()`;
@@ -196,10 +235,34 @@ async function withCdpSession(
       1_500,
       Math.min(CONTENT_READY_MAX_WAIT_MS, timeoutMs - 1_000)
     );
-    let snapshot = await evaluateSnapshot(
-      client,
-      buildWaitForContentReadyExpression(readyBudget)
-    );
+    const deadline = Date.now() + readyBudget;
+    let snapshot: CdpSnapshot | null = null;
+    // Client-side redirects (location.assign / replace) destroy the execution
+    // context mid-wait; retry on the new document until the budget expires.
+    while (Date.now() < deadline) {
+      const remaining = Math.max(400, deadline - Date.now());
+      try {
+        const navigated = client
+          .waitForEvent("Page.loadEventFired", remaining)
+          .then(() => "nav" as const);
+        const waited = evaluateSnapshot(
+          client,
+          buildWaitForContentReadyExpression(remaining)
+        ).then((s) => ({ kind: "snap" as const, s }));
+        const winner = await Promise.race([
+          waited,
+          navigated.then((kind) => ({ kind, s: null as CdpSnapshot | null })),
+        ]);
+        if (winner.kind === "nav") {
+          // New document is loading; loop and wait on it.
+          continue;
+        }
+        snapshot = winner.s;
+        break;
+      } catch {
+        await delay(120, signal).catch(() => {});
+      }
+    }
     if (!snapshot || snapshot.textLen < 40 || snapshot.html.length < 80) {
       snapshot = await evaluateSnapshot(client, SNAPSHOT_JS);
     }
