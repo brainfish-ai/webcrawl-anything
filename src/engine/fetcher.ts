@@ -571,8 +571,9 @@ export function needsBrowserEscalation(
   }
   // Header-only JS pages (quotes.toscrape.com/js): real content lives in a
   // <script> as JSON + document.write / innerHTML, so markdown is just the chrome.
+  // Full-page markdown can exceed ~200 chars of that chrome (nav, footer).
   if (
-    text.length < 200 &&
+    text.length < 500 &&
     /<script[\s>]/i.test(html) &&
     /document\.write|innerHTML\s*=/i.test(html)
   ) {
