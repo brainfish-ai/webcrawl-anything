@@ -27,8 +27,19 @@ describe("honest JS-render failure", () => {
 var data = [{"author":{"name":"Albert Einstein"},"text":"The world as we have created it."}];
 for (var i in data) { document.write("<div class='quote'>"+data[i].text+"</div>"); }
 </script></body></html>`;
-    const markdown = "# Quotes to Scrape\n\nLogin\n\nNext";
+    // Full-page chrome from quotes.toscrape.com/js is ~313 chars (nav + footer),
+    // above the old 200 cutoff and still short of a rendered quote list.
+    const markdown = `# [Quotes to Scrape](https://quotes.toscrape.com/)
+
+                    [Login](https://quotes.toscrape.com/login)
+
+- [Next &rarr;](https://quotes.toscrape.com/js/page/2/)
+
+                Quotes by: [GoodReads.com](https://www.goodreads.com/quotes)
+
+                Made with  ❤  by [Zyte](https://www.zyte.com/)`;
+    assert.ok(markdown.length > 200, `chrome length ${markdown.length}`);
+    assert.ok(markdown.length < 500, `chrome length ${markdown.length}`);
     assert.equal(needsBrowserEscalation(200, html, markdown), true);
-    assert.ok(markdown.length < 120);
   });
 });
