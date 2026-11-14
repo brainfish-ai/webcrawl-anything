@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>API Pricing</title>
+</head>
+<body>
+  <a class="skip-link" href="#main">Skip to content</a>
+  <div class="rebrand">ProntoHQ is now PipeCorn</div>
+  <header>
+    <nav>
+      <a href="/product">Product</a>
+      <a href="/docs">Docs</a>
+      <a href="/demo">Get a demo</a>
+    </nav>
+  </header>
+  <main id="main">
+    <h1>Our API Pricing</h1>
+    <p>
+      Pay per usage pricing model means you buy a credit balance and spend it on live requests.
+      Successful calls draw from that balance. Cached, errored, and failed searches are not billed.
+      Packages stay available after checkout, so a quiet month does not wipe the credits you already paid for.
+      Choose a pack that matches your traffic, then top up when the balance runs low. There is no seat fee
+      and no annual contract required to start sending requests from a staging key.
+    </p>
+    <table>
+      <thead>
+        <tr><th>Plan</th><th>Included</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>Search</td><td>500K real-time searches</td></tr>
+        <tr><td>Growth</td><td>30,000 credits</td></tr>
+        <tr><td>Scale</td><td>500,000 credits</td></tr>
+      </tbody>
+    </table>
+    <form action="/start" method="post">
+      <label for="included">Includes 200 credits/month</label>
+      <label for="needed">Total credits needed</label>
+      <input id="needed" type="number" name="credits" value="200" />
+      <button type="button">Start free verification</button>
+      <input type="submit" value="Get a demo" />
+    </form>
+    <details>
+      <summary>Unused credits roll over for 90 days</summary>
+      <p>Rollover applies to paid plans after the billing period ends.</p>
+    </details>
+    <div class="accordion-panel" aria-hidden="true">
+      <p>Credits expire at the end of each billing cycle</p>
+    </div>
+  </main>
+  <footer>
+    <a href="/terms">Terms of Service</a>
+    <p>All systems operational</p>
+    <p>© 2026 DataMagnet Inc</p>
+  </footer>
+</body>
+</html>

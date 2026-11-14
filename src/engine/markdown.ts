@@ -34,7 +34,7 @@ export function decodeHtmlEntities(text: string): string {
 
 export interface MarkdownOptions {
   retainImages?: "all" | "none";
-  /** Default true: prefer <main>/<article> and drop header/footer/nav/aside. */
+  /** Default false returns the full page. Set true for a Firecrawl-style trim of header/footer/nav/aside. */
   onlyMainContent?: boolean;
   /** Simple selectors (`tag`, `.class`, `#id`, `tag.class`). Keep only matching elements. */
   includeTags?: string[];
@@ -186,8 +186,8 @@ export function fastHtmlToMarkdown(
     }
   }
 
-  // 3. Focus on <main>/<article> (unless onlyMainContent is false), else <body>
-  const onlyMain = options.onlyMainContent !== false;
+  // 3. When onlyMainContent is true, focus on <main>/<article>; otherwise keep <body>.
+  const onlyMain = options.onlyMainContent === true;
   let bodyHtml = html;
   if (options.includeTags?.length) {
     bodyHtml = keepElements(html, options.includeTags);
@@ -209,11 +209,12 @@ export function fastHtmlToMarkdown(
     bodyHtml = removeElements(bodyHtml, options.excludeTags);
   }
 
-  // 4. Strip noise tags: script, style, noscript, svg, iframe, dialog, form, aria-hidden (+ nav chrome when onlyMainContent)
+  // 4. Strip noise tags. Forms stay (pricing calculators live there). Header/footer/nav/aside
+  // and aria-hidden accordions are removed only for the Firecrawl-style trim.
   let cleaned = bodyHtml
     .replace(/<!--[\s\S]*?-->/g, "")
     .replace(
-      /<(script|style|noscript|svg|canvas|template|iframe|dialog|form)(?:[^>"']|"[^"]*"|'[^']*')*>[\s\S]*?<\/\1>/gi,
+      /<(script|style|noscript|svg|canvas|template|iframe|dialog)(?:[^>"']|"[^"]*"|'[^']*')*>[\s\S]*?<\/\1>/gi,
       ""
     );
   if (onlyMain) {
@@ -221,11 +222,11 @@ export function fastHtmlToMarkdown(
       /<(header|footer|nav|aside)(?:[^>"']|"[^"]*"|'[^']*')*>[\s\S]*?<\/\1>/gi,
       ""
     );
+    cleaned = cleaned.replace(
+      /<([a-z0-9]+)\b(?:[^>"']|"[^"]*"|'[^']*')*\baria-hidden=["']true["'](?:[^>"']|"[^"]*"|'[^']*')*>[\s\S]*?<\/\1>/gi,
+      ""
+    );
   }
-  cleaned = cleaned.replace(
-    /<([a-z0-9]+)\b(?:[^>"']|"[^"]*"|'[^']*')*\baria-hidden=["']true["'](?:[^>"']|"[^"]*"|'[^']*')*>[\s\S]*?<\/\1>/gi,
-    ""
-  );
 
   // 5. Preserve <pre><code> blocks via placeholders so whitespace isn't collapsed
   const codeBlocks: string[] = [];
@@ -311,8 +312,31 @@ export function fastHtmlToMarkdown(
       }
     );
 
-  // 10. Lists and paragraphs and tables
+  // 10. Controls and disclosures, then lists, paragraphs, and tables
   cleaned = cleaned
+    .replace(
+      /<button(?:[^>"']|"[^"]*"|'[^']*')*>([\s\S]*?)<\/button>/gi,
+      (_f, inner: string) => {
+        const text = decodeHtmlEntities(stripTags(inner)).replace(/\s+/g, " ").trim();
+        return text ? `\n\n${text}\n\n` : "";
+      }
+    )
+    .replace(/<input\b(?:[^>"']|"[^"]*"|'[^']*')*>/gi, (tag: string) => {
+      const type = (tag.match(/\btype\s*=\s*["']([^"']*)["']/i)?.[1] ?? "").toLowerCase();
+      if (type !== "submit" && type !== "button") return tag;
+      const value = decodeHtmlEntities(tag.match(/\bvalue\s*=\s*["']([^"']*)["']/i)?.[1] ?? "")
+        .replace(/\s+/g, " ")
+        .trim();
+      return value ? `\n\n${value}\n\n` : "";
+    })
+    .replace(
+      /<summary(?:[^>"']|"[^"]*"|'[^']*')*>([\s\S]*?)<\/summary>/gi,
+      (_f, inner: string) => {
+        const text = decodeHtmlEntities(stripTags(inner)).replace(/\s+/g, " ").trim();
+        return text ? `\n\n**${text}**\n\n` : "";
+      }
+    )
+    .replace(/<\/?details(?:[^>"']|"[^"]*"|'[^']*')*>/gi, "\n\n")
     .replace(
       /<li(?:[^>"']|"[^"]*"|'[^']*')*>([\s\S]*?)<\/li>/gi,
       (_f, inner: string) => {
@@ -348,7 +372,7 @@ export function fastHtmlToMarkdown(
       }
     )
     .replace(/<br\s*\/?>/gi, "\n")
-    .replace(/<\/(p|div|section|article|ul|ol|table|dl)>/gi, "\n\n")
+    .replace(/<\/(p|div|section|article|ul|ol|table|dl|form|label)>/gi, "\n\n")
     .replace(/<hr\s*\/?>/gi, "\n\n---\n\n");
 
   // 11. Strip remaining HTML tags and decode entities

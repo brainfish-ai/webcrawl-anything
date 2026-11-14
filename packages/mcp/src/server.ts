@@ -133,7 +133,7 @@ export function createWebcrawlMcpServer(
       title: "Read a page",
       description: compact
         ? "Fetch one URL as clean markdown."
-        : "Fetch one URL and return its main content as markdown.",
+        : "Fetch one URL and return the full page as markdown by default. Set onlyMainContent to trim header, footer, nav, and aside.",
       inputSchema: {
         url: z.string().url(),
         no_cache: desc(z.boolean().optional(), "Skip cached copy"),
