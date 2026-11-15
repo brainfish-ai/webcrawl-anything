@@ -82,7 +82,7 @@ Options
   --api-key <key>     Override WEBCRAWL_API_KEY
   --url <base>        Override WEBCRAWL_URL (default https://webcrawl.app)
   --country, --city   Where to search from (default: this machine's timezone)
-  --no-cache          Skip cached pages (scrape)
+  --no-cache          Skip cached pages (scrape, crawl)
   --scope <s|u|w>     Monitor scope: page (default), urls, or site
   --interval <mins>   Monitor check interval in minutes (default 60)
   --watch-for <text>  What to watch for (e.g. "Pricing tiers and discounts")
@@ -567,7 +567,7 @@ export async function main(argv: string[], io: Io, deps: Deps = {}): Promise<num
         return 0;
       }
       case "crawl": {
-        const res = await client.crawl({ url: need("url"), maxPages: int(v.limit, "--limit") });
+        const res = await client.crawl({ url: need("url"), maxPages: int(v.limit, "--limit"), noCache: v["no-cache"] });
         emit(res, formatCrawl(res));
         return 0;
       }

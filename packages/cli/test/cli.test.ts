@@ -44,6 +44,18 @@ describe("webcrawl CLI", () => {
     assert.equal(t.err(), "");
   });
 
+  it("crawl forwards --no-cache without changing its default", async () => {
+    for (const noCache of [false, true]) {
+      const t = setup(() => ({ json: { data: [] } }));
+      const args = ["crawl", "https://a.com", "-n", "2"];
+      if (noCache) args.push("--no-cache");
+      assert.equal(await t.run(args), 0);
+      assert.deepEqual(t.calls[0].body, {
+        url: "https://a.com", maxPages: 2, ...(noCache ? { noCache: true } : {}),
+      });
+    }
+  });
+
   it("scrape prints markdown", async () => {
     const t = setup(() => ({ json: { data: { markdown: "# Hello" } } }));
     await t.run(["scrape", "https://a.com"]);
