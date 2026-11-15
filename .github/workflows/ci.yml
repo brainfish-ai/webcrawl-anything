@@ -38,4 +38,6 @@ jobs:
         run: npm run test:packages
 
       - name: Run core engine unit tests
-        run: npm test
+        # test:core uses --test-concurrency=1 so Chrome suites do not contend
+        # for CPU on shared runners (see src/__tests__/helpers/chrome-timing.ts).
+        run: npm run test:core
