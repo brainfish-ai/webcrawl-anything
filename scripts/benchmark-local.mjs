@@ -25,7 +25,7 @@ const CASES = [
   { kind: "news", cmd: ["scrape", "https://news.ycombinator.com"] },
   // map prints one URL per line, so a short-but-correct answer is a few hundred chars.
   { kind: "map", cmd: ["map", "https://react.dev", "-n", "20"], minChars: 60 },
-  // `crawl` is left out: it has no --no-cache flag, so repeat runs would measure the cache.
+  { kind: "crawl", cmd: ["crawl", "https://react.dev", "-n", "3", "--no-cache"] },
   { kind: "search", cmd: ["search", "postgres jsonb index performance", "-n", "5"] },
   { kind: "search", cmd: ["search", "next.js app router vs pages router differences", "-n", "5"] },
   { kind: "cve", cmd: ["search", "CVE-2024-3094 xz utils", "-c", "security", "--sub", "cve", "-n", "2"] },

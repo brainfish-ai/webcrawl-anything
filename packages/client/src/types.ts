@@ -104,6 +104,7 @@ export interface MapParams {
 
 export interface CrawlParams {
   url: string;
+  noCache?: boolean;
   maxPages?: number;
   extractStructured?: boolean;
 }
