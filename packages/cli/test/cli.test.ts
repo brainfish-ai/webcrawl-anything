@@ -22,7 +22,11 @@ function setup(handler: (url: string, body?: Record<string, unknown>) => { statu
     return new Response(JSON.stringify(r.json), { status: r.status ?? 200 });
   }) as unknown as typeof fetch;
   const run = (args: string[], env: NodeJS.ProcessEnv = { WEBCRAWL_API_KEY: "wc_live_test", WEBCRAWL_URL: "https://x.test" }) =>
-    main(args, { out: (s) => (out += s), err: (s) => (err += s), readStdin: async () => stdin, isTTY: false }, { env, fetch: f, configFile: join(dir, "config.json") });
+    main(
+      args,
+      { out: (s) => (out += s), err: (s) => (err += s), readStdin: async () => stdin, isTTY: false },
+      { env, fetch: f, configFile: join(dir, "config.json"), stdoutIsTTY: false }
+    );
   return { run, calls, dir, out: () => out, err: () => err };
 }
 

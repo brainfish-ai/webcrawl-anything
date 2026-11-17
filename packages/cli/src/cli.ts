@@ -31,6 +31,7 @@ import {
   runSetup,
   type SupportedAgentId,
 } from "./setup.js";
+import { maybeShowStarPrompt } from "./star-prompt.js";
 
 export interface Io {
   out: (s: string) => void;
@@ -51,6 +52,12 @@ export interface Deps {
   homeDir?: string;
   /** Working directory override for `webcrawl setup` tests. */
   cwd?: string;
+  /** Override stdout TTY detection for the occasional star nudge (tests). */
+  stdoutIsTTY?: boolean;
+  /** Override star-prompt state file path (tests). */
+  starPromptStateFile?: string;
+  /** Override clock for star-prompt frequency (tests). */
+  nowMs?: number;
 }
 
 export const HELP = `Webcrawl Anything: search, scrape, parse and crawl any target on the internet
@@ -94,7 +101,8 @@ Options
   -v, --version       Print the installed package version
   -h, --help
 
-Config order: flags, then WEBCRAWL_API_KEY / WEBCRAWL_URL / WEBCRAWL_MODE, then ~/.config/webcrawl/config.json`;
+Config order: flags, then WEBCRAWL_API_KEY / WEBCRAWL_URL / WEBCRAWL_MODE, then ~/.config/webcrawl/config.json
+  WEBCRAWL_NO_STAR_PROMPT=1   Opt out of the occasional GitHub star nudge on interactive runs`;
 
 const OPTIONS = {
   json: { type: "boolean" },
@@ -466,6 +474,21 @@ export async function main(argv: string[], io: Io, deps: Deps = {}): Promise<num
     return cmd || v.help ? 0 : 2;
   }
 
+  /** After a successful non-JSON command, maybe print a dim star nudge on stderr. */
+  const finish = (code: number): number => {
+    if (code === 0 && !v.json) {
+      maybeShowStarPrompt({
+        isStdoutTTY: deps.stdoutIsTTY ?? Boolean(process.stdout.isTTY),
+        env,
+        jsonOutput: false,
+        write: (s) => io.err(s),
+        stateFile: deps.starPromptStateFile,
+        nowMs: deps.nowMs,
+      });
+    }
+    return code;
+  };
+
   const file = deps.configFile ?? configPath(env);
   const cfg = resolveConfig(
     { apiKey: v["api-key"], baseUrl: v.url, mode: v.mode },
@@ -549,7 +572,7 @@ export async function main(argv: string[], io: Io, deps: Deps = {}): Promise<num
           return 1;
         }
         emit(res, formatSearch(res));
-        return res.success === false ? 1 : 0;
+        return res.success === false ? 1 : finish(0);
       }
       case "scrape": {
         const res = await client.scrape({ url: need("url"), formats: ["markdown"], noCache: v["no-cache"] });
@@ -559,17 +582,17 @@ export async function main(argv: string[], io: Io, deps: Deps = {}): Promise<num
           return 1;
         }
         emit(res, formatScrape(res));
-        return res.success === false ? 1 : 0;
+        return res.success === false ? 1 : finish(0);
       }
       case "map": {
         const res = await client.map({ url: need("url"), search: v.filter, limit: int(v.limit, "--limit") });
         emit(res, formatMap(res));
-        return 0;
+        return finish(0);
       }
       case "crawl": {
         const res = await client.crawl({ url: need("url"), maxPages: int(v.limit, "--limit") });
         emit(res, formatCrawl(res));
-        return 0;
+        return finish(0);
       }
       case "extract": {
         let schema: Record<string, unknown> | undefined;
@@ -590,7 +613,7 @@ export async function main(argv: string[], io: Io, deps: Deps = {}): Promise<num
           return 1;
         }
         emit(res, JSON.stringify(res.data ?? res, null, 2));
-        return res.success === false ? 1 : 0;
+        return res.success === false ? 1 : finish(0);
       }
       case "rerank": {
         const query = need("query");
@@ -604,7 +627,7 @@ export async function main(argv: string[], io: Io, deps: Deps = {}): Promise<num
         if (!docs.length) {throw new UsageError("No documents. Pass --doc, --file, or pipe lines on stdin.");}
         const res = await client.rerank({ query, documents: docs, topK: int(v.limit, "--limit") });
         emit(res, formatRerank(res));
-        return 0;
+        return finish(0);
       }
       case "monitor": {
         const cloudClient = new WebcrawlClient({
@@ -645,17 +668,17 @@ export async function main(argv: string[], io: Io, deps: Deps = {}): Promise<num
         if (sub === "list" || sub === "ls") {
           const res = await cloudClient.monitors();
           emit(res, formatMonitor(res));
-          return 0;
+          return finish(0);
         }
         if (sub === "get" || sub === "inspect") {
           const res = await cloudClient.getMonitor(requireMonitorId(sub));
           emit(res, formatMonitor(res));
-          return 0;
+          return finish(0);
         }
         if (sub === "check") {
           const res = await cloudClient.checkMonitor(requireMonitorId("check"));
           emit(res, formatMonitor(res));
-          return 0;
+          return finish(0);
         }
         if (sub === "pause" || sub === "resume") {
           const id = requireMonitorId(sub);
@@ -676,12 +699,12 @@ export async function main(argv: string[], io: Io, deps: Deps = {}): Promise<num
             webhookUrl: v.webhook,
           });
           emit(res, formatMonitor(res));
-          return 0;
+          return finish(0);
         }
         if (sub === "delete" || sub === "rm") {
           const res = await cloudClient.deleteMonitor(requireMonitorId(sub));
           emit(res, formatMonitor(res));
-          return 0;
+          return finish(0);
         }
 
         // create / add / watch / `webcrawl monitor <url...>`
@@ -714,17 +737,17 @@ export async function main(argv: string[], io: Io, deps: Deps = {}): Promise<num
           webhookUrl: v.webhook,
         });
         emit(res, formatMonitor(res));
-        return 0;
+        return finish(0);
       }
       case "categories": {
         const res = await client.categories();
         emit(res, JSON.stringify(res, null, 2));
-        return 0;
+        return finish(0);
       }
       case "targets": {
         const res = await client.targets();
         emit(res, formatTargets(res));
-        return 0;
+        return finish(0);
       }
       case "setup": {
         const rawAgents = v.agent ?? [];
@@ -761,7 +784,7 @@ export async function main(argv: string[], io: Io, deps: Deps = {}): Promise<num
           "Restart your agent to load the `webcrawl` MCP server and `webcrawl-anything` skill.",
         ].join("\n");
         emit({ success: true, ...setupRes }, prettyLines);
-        return 0;
+        return finish(0);
       }
       case "doctor": {
         const report = runDoctor(env, cfg.effectiveMode, cfg.source.apiKey);
@@ -773,7 +796,7 @@ export async function main(argv: string[], io: Io, deps: Deps = {}): Promise<num
           }),
         ].join("\n");
         emit({ success: true, ...report }, prettyLines);
-        return 0;
+        return finish(0);
       }
       case "login":
       case "signup": {
@@ -807,7 +830,7 @@ export async function main(argv: string[], io: Io, deps: Deps = {}): Promise<num
               `Saved API key to ${file}.`,
             ].join("\n")
           );
-          return 0;
+          return finish(0);
         }
 
         // 2. Email OTP account creation / sign-in (`webcrawl login --email <addr> [--code <6-digit>]`)
@@ -842,7 +865,7 @@ export async function main(argv: string[], io: Io, deps: Deps = {}): Promise<num
                   `Or redirect the user to sign in on the web: ${stepPayload.browserFallbackUrl}`,
                 ].join("\n")
               );
-              return 0;
+              return finish(0);
             }
           }
 
@@ -875,7 +898,7 @@ export async function main(argv: string[], io: Io, deps: Deps = {}): Promise<num
               `Saved API key (${verified.apiKey.slice(0, 8)}…${verified.apiKey.slice(-4)}) to ${file}.`,
             ].join("\n")
           );
-          return 0;
+          return finish(0);
         }
 
         // 3. Direct API key (`webcrawl login --key wc_live_...` or interactive paste)
@@ -884,7 +907,7 @@ export async function main(argv: string[], io: Io, deps: Deps = {}): Promise<num
         const existing = readConfigFile(file);
         writeConfigFile({ ...existing, apiKey: key, ...(v.url ? { baseUrl: v.url } : {}) }, file);
         io.out(`Saved your key to ${file}.\n`);
-        return 0;
+        return finish(0);
       }
       case "whoami": {
         const masked = cfg.apiKey ? `${cfg.apiKey.slice(0, 8)}…${cfg.apiKey.slice(-4)}` : "none";
@@ -909,7 +932,7 @@ export async function main(argv: string[], io: Io, deps: Deps = {}): Promise<num
           }
         }
         io.out(`${lines.join("\n")}\n`);
-        return 0;
+        return finish(0);
       }
       default:
         throw new UsageError(`Unknown command "${cmd}".`);
