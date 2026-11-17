@@ -2,6 +2,10 @@
 
 **Crawl, search, and extract structured evidence from any website, SPA, PDF, Office file, YouTube video, GitHub repo, ArXiv paper, shopping offer, travel fare, or CVE advisory — from a single CLI and MCP server.**
 
+If webcrawl saves you time, a [star on GitHub](https://github.com/brainfish-ai/webcrawl-anything) helps other people find it.
+
+The interactive CLI may print a one-line star nudge on stderr after a successful run (TTY only, never in CI, never with JSON output, never on the MCP stdio server). Set `WEBCRAWL_NO_STAR_PROMPT=1` to opt out.
+
 [![npm version](https://img.shields.io/npm/v/webcrawl?color=0a0a0a)](https://www.npmjs.com/package/webcrawl)
 [![MCP Server](https://img.shields.io/npm/v/@webcrawl/mcp?label=%40webcrawl%2Fmcp&color=2563eb)](https://www.npmjs.com/package/@webcrawl/mcp)
 [![Cloud API](https://img.shields.io/badge/cloud-webcrawl.app-10b981)](https://webcrawl.app)

@@ -11,3 +11,15 @@ export {
   type SetupResult,
   type SupportedAgentId,
 } from "./setup.js";
+export {
+  STAR_PROMPT_INTERVAL_MS,
+  STAR_PROMPT_MESSAGE,
+  STAR_REPO_URL,
+  formatStarPromptLine,
+  maybeShowStarPrompt,
+  shouldShowStarPrompt,
+  starPromptStatePath,
+  type MaybeShowStarPromptOpts,
+  type StarPromptGateInput,
+  type StarPromptState,
+} from "./star-prompt.js";

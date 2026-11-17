@@ -2,6 +2,8 @@
 
 Model Context Protocol (MCP) server for **[Webcrawl Anything](https://github.com/brainfish-ai/webcrawl-anything)**.
 
+If webcrawl saves you time, a [star on GitHub](https://github.com/brainfish-ai/webcrawl-anything) helps other people find it.
+
 Gives Claude Code, Cursor, Codex, Windsurf, and Gemini CLI live access to web search, structured verticals (shopping, flights, hotels, real-estate, local business, CVEs), page reading for JavaScript-heavy sites, and PDF/Office parsing. It runs on your machine with no API key and no account.
 
 ## One-Command Agent Setup

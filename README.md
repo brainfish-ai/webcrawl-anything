@@ -23,6 +23,10 @@
 
 <sub>Every frame above is real output, recorded with <code>node scripts/record-demo.mjs</code>. No API key, no account.</sub>
 
+<p align="center">If webcrawl saves you time, a <a href="https://github.com/brainfish-ai/webcrawl-anything">star on GitHub</a> helps other people find it.</p>
+
+The interactive CLI may print a one-line star nudge on stderr after a successful run (TTY only, never in CI, never with JSON output, never on the MCP stdio server). Set <code>WEBCRAWL_NO_STAR_PROMPT=1</code> to opt out.
+
 ## Set up in one line
 
 ```bash
